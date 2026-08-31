@@ -1282,7 +1282,7 @@ fn apply_meson_target(
     let native_file = meson_native_file(layout, target, name)?;
     command.arg("--native-file").arg(native_file);
     apply_apple_target_env(command, target)?;
-    apply_android_host_env(command, target)?;
+    apply_windows_cross_host_env(command, target)?;
     apply_windows_target_env(command, target)
 }
 
@@ -1381,10 +1381,12 @@ fn meson_cross_file(
     } else if let Some(config) = ohos_toolchain(target)? {
         let pkg_config = ensure_pkg_config_shim(layout)?;
         let pic_flags = vec!["-fPIC".to_string()];
+        let clang = ohos_meson_compiler(&config, false)?;
+        let clangxx = ohos_meson_compiler(&config, true)?;
         format!(
             "[binaries]\nc = {}\ncpp = {}\nar = {}\nstrip = {}\npkg-config = {}\n\n[built-in options]\nc_args = {}\ncpp_args = {}\nc_link_args = {}\ncpp_link_args = {}\n\n[properties]\nneeds_exe_wrapper = true\n\n[host_machine]\nsystem = 'linux'\ncpu_family = {}\ncpu = {}\nendian = 'little'\n",
-            meson_string(&config.clang.display().to_string()),
-            meson_string(&config.clangxx.display().to_string()),
+            clang,
+            clangxx,
             meson_string(&config.ar.display().to_string()),
             meson_string(&config.strip.display().to_string()),
             meson_string(&pkg_config.display().to_string()),
@@ -1477,6 +1479,31 @@ fn meson_array(values: &[String]) -> String {
     )
 }
 
+fn ohos_meson_compiler(config: &OhosToolchain, cxx: bool) -> Result<String> {
+    if !cfg!(windows) {
+        return Ok(meson_string(
+            &(if cxx { &config.clangxx } else { &config.clang })
+                .display()
+                .to_string(),
+        ));
+    }
+
+    // The Windows SDK ships the target-prefixed drivers as POSIX shell
+    // wrappers. Meson launches compiler entries directly, so use the native
+    // executable with the exact flags from those wrappers.
+    let driver = required_executable_in_dir(
+        &config.bin_dir,
+        if cxx { "clang++" } else { "clang" },
+        "OpenHarmony Clang driver",
+    )?;
+    Ok(meson_array(&[
+        driver.display().to_string(),
+        "--target=aarch64-linux-ohos".to_string(),
+        format!("--sysroot={}", config.sysroot.display()),
+        "-D__MUSL__".to_string(),
+    ]))
+}
+
 fn meson_string(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
@@ -1504,12 +1531,12 @@ fn meson_compile_install(
         compile.arg(format!("-j{jobs}"));
     }
     apply_windows_target_env(&mut compile, target)?;
-    apply_android_host_env(&mut compile, target)?;
+    apply_windows_cross_host_env(&mut compile, target)?;
     run(&mut compile)?;
     let mut install = meson_command(meson);
     install.arg("install").arg("-C").arg(build_dir);
     apply_windows_target_env(&mut install, target)?;
-    apply_android_host_env(&mut install, target)?;
+    apply_windows_cross_host_env(&mut install, target)?;
     run(&mut install)
 }
 
@@ -2290,6 +2317,9 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
             "--sysroot={}",
             path_to_forward_slashes(&config.sysroot)
         ));
+        if let Some(host_cc) = ffmpeg_ohos_host_cc(&config)? {
+            configure.arg(format!("--host-cc={host_cc}"));
+        }
         extra_cflags.push(format!(
             "-I{}",
             ffmpeg_flag_path_arg(&layout.zlib_prefix.join("include"))
@@ -2346,7 +2376,7 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
     }
     apply_windows_posix_shell(&mut configure, options.target);
     append_windows_posix_paths(&mut configure);
-    apply_android_host_env(&mut configure, options.target)?;
+    apply_windows_cross_host_env(&mut configure, options.target)?;
     if !extra_cflags.is_empty() {
         configure.arg(format!("--extra-cflags={}", extra_cflags.join(" ")));
     }
@@ -2377,7 +2407,7 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         ffmpeg_make_command(&make, &layout.ffmpeg_build_dir, &build_args, options.target)?;
     apply_windows_target_env(&mut build, options.target)?;
     apply_ffmpeg_assembler_path(&mut build, options.target, gas_preprocessor_dir.as_deref());
-    apply_android_host_env(&mut build, options.target)?;
+    apply_windows_cross_host_env(&mut build, options.target)?;
     apply_windows_posix_shell(&mut build, options.target);
     append_windows_posix_paths(&mut build);
     run(&mut build)?;
@@ -2394,7 +2424,7 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         options.target,
         gas_preprocessor_dir.as_deref(),
     );
-    apply_android_host_env(&mut install, options.target)?;
+    apply_windows_cross_host_env(&mut install, options.target)?;
     apply_windows_posix_shell(&mut install, options.target);
     append_windows_posix_paths(&mut install);
     run(&mut install)?;
@@ -2763,6 +2793,21 @@ fn ffmpeg_android_host_cc(config: &AndroidToolchain) -> Result<Option<String>> {
     }
     let clang =
         required_executable_in_dir(&config.bin_dir, "clang", "Android NDK host Clang compiler")?;
+    Ok(Some(format!(
+        "{} --target={} -fuse-ld=link",
+        ffmpeg_flag_path_arg(&clang),
+        windows_host_target()
+            .triple()
+            .context("Windows host target must have a Rust triple")?
+    )))
+}
+
+fn ffmpeg_ohos_host_cc(config: &OhosToolchain) -> Result<Option<String>> {
+    if !cfg!(windows) {
+        return Ok(None);
+    }
+    let clang =
+        required_executable_in_dir(&config.bin_dir, "clang", "OpenHarmony host Clang compiler")?;
     Ok(Some(format!(
         "{} --target={} -fuse-ld=link",
         ffmpeg_flag_path_arg(&clang),
@@ -3732,8 +3777,8 @@ fn apply_windows_target_env(command: &mut Command, target: NativeTarget) -> Resu
     apply_msvc_environment(command, target)
 }
 
-fn apply_android_host_env(command: &mut Command, target: NativeTarget) -> Result<()> {
-    if !cfg!(windows) || !target.is_android() {
+fn apply_windows_cross_host_env(command: &mut Command, target: NativeTarget) -> Result<()> {
+    if !cfg!(windows) || !(target.is_android() || target.is_ohos()) {
         return Ok(());
     }
     apply_msvc_environment(command, windows_host_target())
@@ -4141,7 +4186,7 @@ fn apply_windows_posix_shell(command: &mut Command, target: NativeTarget) {
 }
 
 fn uses_windows_posix_ffmpeg(target: NativeTarget) -> bool {
-    cfg!(windows) && (target.is_windows() || target.is_android())
+    cfg!(windows) && (target.is_windows() || target.is_android() || target.is_ohos())
 }
 
 fn host_c_compiler() -> Result<PathBuf> {

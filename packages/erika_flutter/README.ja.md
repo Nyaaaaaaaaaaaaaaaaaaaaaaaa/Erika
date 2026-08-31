@@ -208,11 +208,12 @@ HarmonyOS では `ErikaVideoView` を使ってください。Flutter external te
 その texture surface を `OHNativeWindow` として取得して、wgpu Vulkan で描画します。
 音声は OHAudio の interleaved f32 PCM です。
 
-この AV1/AVIF 専用 fork は HarmonyOS で dav1d software decode を既定にします。
-保持されている AVCodec integration は H.264/HEVC のみ対応するため、supported media には選択されません。
-dav1d frame は既存の CPU-upload path で Vulkan compositor に渡されます。AVCodec
-Surface integration は ABI/source compatibility のためだけに保持され、この fork の
-media support 対象外です。
+この AV1/AVIF 専用 fork は HarmonyOS で hardware category の `video/av1` AVCodec
+capability のみを照会し、coded size を検証してから返された codec name で decoder
+を作成します。system 推奨の software AVCodec は選択せず、capability 不在、size
+非対応、open/runtime failure の場合は直接 dav1d へ fallback します。Surface output
+は NativeBuffer/Vulkan、AVCodec buffer output と dav1d は CPU upload を使います。
+static AVIF も同じ方針です。
 
 ## HTTP ヘッダー
 

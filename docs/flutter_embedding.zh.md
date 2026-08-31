@@ -65,10 +65,11 @@ HarmonyOS 上请使用 `ErikaVideoView`。ArkTS 插件注册 Flutter 外部纹�
 surface 取为 `OHNativeWindow` 并 attach 给 presenter；wgpu 随后通过 Vulkan 渲染，
 窗口系统集成走 `VK_OHOS_surface`。
 
-此 AV1/AVIF 专用 fork 在 HarmonyOS 上直接选择源码构建的 dav1d，因为保留的
-AVCodec bridge 仅支持 H.264/HEVC。dav1d 帧通过 CPU upload 进入与字幕、弹幕和
-overlay 相同的 wgpu pass。AVCodec Surface 路径只为 ABI/源码兼容保留，不属于支持的
-媒体范围。此 fork 的 HarmonyOS 真机验收尚未执行。
+此 AV1/AVIF 专用 fork 在 HarmonyOS 上只查询硬件类别的 `video/av1` AVCodec
+capability，校验编码尺寸后按返回的 codec name 创建 decoder，不选择系统软件
+AVCodec。Surface 输出复用现有 NativeBuffer 导入，buffer 输出走 CPU upload；能力、
+打开、运行、seek 重开或导入失败时直接回退 dav1d。硬件路径的 HarmonyOS 真机验收
+尚未执行。
 
 ## 透明视频与混合模式
 

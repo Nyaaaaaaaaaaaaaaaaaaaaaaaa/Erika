@@ -1389,11 +1389,12 @@ impl Decoder {
         surface: Option<Arc<crate::ohos::avcodec::OhosAvCodecSurface>>,
     ) -> Result<Self> {
         let codec_kind = match codec_id {
+            sys::AVCodecID_AV_CODEC_ID_AV1 => OhosVideoCodec::Av1,
             sys::AVCodecID_AV_CODEC_ID_H264 => OhosVideoCodec::Avc,
             sys::AVCodecID_AV_CODEC_ID_HEVC => OhosVideoCodec::Hevc,
             _ => {
                 return Err(FfmpegError::OhosAvCodec(format!(
-                    "unsupported codec id {codec_id}; AVCodec hardware decoding currently supports H.264 and HEVC"
+                    "unsupported codec id {codec_id}; AVCodec hardware decoding supports AV1, H.264 and HEVC"
                 )));
             }
         };
@@ -1419,6 +1420,8 @@ impl Decoder {
                 "event": "ohos_avcodec_decoder",
                 "stage": "decoder_opened",
                 "codec": codec_kind.as_str(),
+                "codecName": ohos_decoder.codec_name(),
+                "hardwareCapability": ohos_decoder.uses_hardware_capability(),
                 "mode": output_mode,
                 "width": width,
                 "height": height,

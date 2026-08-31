@@ -1,10 +1,14 @@
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::{self, NonNull};
 use std::slice;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+
+use crate::ohos_av1::{
+    HardwareAv1CapabilityRejection, av1_codec_config_obus, select_hardware_av1_codec_name,
+};
 
 const AV_ERR_OK: i32 = 0;
 const AV_PIXEL_FORMAT_NV12: i32 = 2;
@@ -27,6 +31,11 @@ struct OH_AVFormat {
 
 #[repr(C)]
 struct OH_AVBuffer {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+struct OH_AVCapability {
     _private: [u8; 0],
 }
 
@@ -98,6 +107,7 @@ struct OH_AVCodecCallback {
 #[link(name = "native_media_vdec")]
 unsafe extern "C" {
     fn OH_VideoDecoder_CreateByMime(mime: *const c_char) -> *mut OH_AVCodec;
+    fn OH_VideoDecoder_CreateByName(name: *const c_char) -> *mut OH_AVCodec;
     fn OH_VideoDecoder_Destroy(codec: *mut OH_AVCodec) -> i32;
     fn OH_VideoDecoder_RegisterCallback(
         codec: *mut OH_AVCodec,
@@ -187,6 +197,17 @@ unsafe extern "C" {
 
 #[link(name = "native_media_codecbase")]
 unsafe extern "C" {
+    fn OH_AVCodec_GetCapabilityByCategory(
+        mime: *const c_char,
+        is_encoder: bool,
+        category: i32,
+    ) -> *mut OH_AVCapability;
+    fn OH_AVCapability_GetName(capability: *mut OH_AVCapability) -> *const c_char;
+    fn OH_AVCapability_IsVideoSizeSupported(
+        capability: *mut OH_AVCapability,
+        width: i32,
+        height: i32,
+    ) -> bool;
     static OH_MD_KEY_MAX_INPUT_SIZE: *const c_char;
     static OH_MD_KEY_PIXEL_FORMAT: *const c_char;
     static OH_MD_KEY_CODEC_CONFIG: *const c_char;
@@ -200,6 +221,7 @@ unsafe extern "C" {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OhosVideoCodec {
+    Av1,
     Avc,
     Hevc,
 }
@@ -207,6 +229,7 @@ pub enum OhosVideoCodec {
 impl OhosVideoCodec {
     fn mime(self) -> &'static [u8] {
         match self {
+            Self::Av1 => b"video/av1\0",
             Self::Avc => b"video/avc\0",
             Self::Hevc => b"video/hevc\0",
         }
@@ -214,6 +237,7 @@ impl OhosVideoCodec {
 
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Av1 => "av1",
             Self::Avc => "h264",
             Self::Hevc => "hevc",
         }
@@ -732,6 +756,8 @@ pub struct OhosVideoDecoder {
     codec: *mut OH_AVCodec,
     callback_context: Box<CallbackContext>,
     codec_kind: OhosVideoCodec,
+    codec_name: String,
+    hardware_capability: bool,
     nal_length_size: Option<usize>,
     parameter_sets: Vec<u8>,
     parameter_sets_sent: bool,
@@ -755,14 +781,50 @@ impl OhosVideoDecoder {
 
         let (codec_config, nal_length_size, parameter_sets) =
             normalize_codec_config(codec_kind, codec_config)?;
-        let surface = surface.and_then(|surface| {
-            surface
-                .prepare_for_decoder_attachment()
-                .ok()
-                .map(|()| surface)
+        let surface = surface.and_then(|surface| match surface.prepare_for_decoder_attachment() {
+            Ok(()) => Some(surface),
+            Err(reason) => {
+                crate::trace::diagnostic(
+                    serde_json::json!({
+                        "event": "ohos_avcodec_decoder",
+                        "stage": "surface_prepare_failed_using_buffer",
+                        "codec": codec_kind.as_str(),
+                        "mode": "buffer_nv12_direct_frame_copy",
+                        "width": width,
+                        "height": height,
+                        "reason": reason,
+                    })
+                    .to_string(),
+                );
+                None
+            }
         });
         let mime = codec_kind.mime();
-        let codec = unsafe { OH_VideoDecoder_CreateByMime(mime.as_ptr().cast()) };
+        let (codec, codec_name, hardware_capability) = if codec_kind == OhosVideoCodec::Av1 {
+            let codec_name = hardware_av1_codec_name(mime, width, height)?;
+            let codec = unsafe { OH_VideoDecoder_CreateByName(codec_name.as_ptr().cast()) };
+            if codec.is_null() {
+                crate::trace::diagnostic(
+                    serde_json::json!({
+                        "event": "ohos_avcodec_capability",
+                        "stage": "hardware_decoder_create_failed",
+                        "codec": codec_kind.as_str(),
+                        "codecName": codec_name.to_string_lossy(),
+                        "width": width,
+                        "height": height,
+                    })
+                    .to_string(),
+                );
+                return Err(format!(
+                    "OH_VideoDecoder_CreateByName returned null for hardware AV1 decoder {}",
+                    codec_name.to_string_lossy()
+                ));
+            }
+            (codec, codec_name.to_string_lossy().into_owned(), true)
+        } else {
+            let codec = unsafe { OH_VideoDecoder_CreateByMime(mime.as_ptr().cast()) };
+            (codec, "system-recommended".to_string(), false)
+        };
         if codec.is_null() {
             return Err(format!(
                 "OH_VideoDecoder_CreateByMime returned null for {}",
@@ -781,13 +843,36 @@ impl OhosVideoDecoder {
             codec,
             callback_context,
             codec_kind,
+            codec_name,
+            hardware_capability,
             nal_length_size,
             parameter_sets,
             parameter_sets_sent: false,
             surface,
             started: false,
         };
-        decoder.initialize(width, height, &codec_config)?;
+        if let Err(reason) = decoder.initialize(width, height, &codec_config) {
+            crate::trace::diagnostic(
+                serde_json::json!({
+                    "event": "ohos_avcodec_decoder",
+                    "stage": "hardware_decoder_initialize_failed",
+                    "failureStage": avcodec_initialization_failure_stage(&reason),
+                    "codec": codec_kind.as_str(),
+                    "codecName": decoder.codec_name.as_str(),
+                    "hardwareCapability": decoder.hardware_capability,
+                    "mode": if decoder.surface.is_some() {
+                        "surface_native_buffer"
+                    } else {
+                        "buffer_nv12_direct_frame_copy"
+                    },
+                    "width": width,
+                    "height": height,
+                    "reason": reason.as_str(),
+                })
+                .to_string(),
+            );
+            return Err(reason);
+        }
         Ok(decoder)
     }
 
@@ -1050,6 +1135,14 @@ impl OhosVideoDecoder {
         self.surface.is_some()
     }
 
+    pub fn codec_name(&self) -> &str {
+        &self.codec_name
+    }
+
+    pub fn uses_hardware_capability(&self) -> bool {
+        self.hardware_capability
+    }
+
     pub fn flush(&mut self) -> Result<(), String> {
         self.check_callback_error()?;
         check_avcodec(
@@ -1120,14 +1213,109 @@ fn normalize_codec_config(
     if codec_config.is_empty() {
         return Ok((Vec::new(), None, Vec::new()));
     }
+    if codec == OhosVideoCodec::Av1 {
+        let config_obus = av1_codec_config_obus(codec_config).map_err(|error| error.to_string())?;
+        return Ok((config_obus.to_vec(), None, Vec::new()));
+    }
     if is_annex_b(codec_config) {
         return Ok((codec_config.to_vec(), None, codec_config.to_vec()));
     }
     let (parameter_sets, nal_length_size) = match codec {
+        OhosVideoCodec::Av1 => unreachable!("AV1 codec config is normalized above"),
         OhosVideoCodec::Avc => avcc_to_annex_b(codec_config),
         OhosVideoCodec::Hevc => hvcc_to_annex_b(codec_config),
     }?;
     Ok((codec_config.to_vec(), nal_length_size, parameter_sets))
+}
+
+fn hardware_av1_codec_name(
+    mime: &'static [u8],
+    width: u32,
+    height: u32,
+) -> Result<CString, String> {
+    const HARDWARE_CODEC_CATEGORY: i32 = 0;
+    let capability = unsafe {
+        OH_AVCodec_GetCapabilityByCategory(mime.as_ptr().cast(), false, HARDWARE_CODEC_CATEGORY)
+    };
+    let name_ptr = if capability.is_null() {
+        ptr::null()
+    } else {
+        unsafe { OH_AVCapability_GetName(capability) }
+    };
+    let codec_name = if name_ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(name_ptr) })
+    };
+    let codec_name_text = codec_name.map(|name| name.to_str().unwrap_or(""));
+    let size_supported = !capability.is_null()
+        && unsafe { OH_AVCapability_IsVideoSizeSupported(capability, width as i32, height as i32) };
+    match select_hardware_av1_codec_name(codec_name_text, size_supported) {
+        Ok(_) => {
+            let codec_name = codec_name.expect("validated codec name exists");
+            crate::trace::diagnostic(
+                serde_json::json!({
+                    "event": "ohos_avcodec_capability",
+                    "stage": "hardware_available",
+                    "codec": "av1",
+                    "codecName": codec_name.to_string_lossy(),
+                    "width": width,
+                    "height": height,
+                })
+                .to_string(),
+            );
+            Ok(codec_name.to_owned())
+        }
+        Err(rejection) => {
+            let stage = match rejection {
+                HardwareAv1CapabilityRejection::Unavailable => "hardware_unavailable",
+                HardwareAv1CapabilityRejection::EmptyCodecName => "hardware_codec_name_invalid",
+                HardwareAv1CapabilityRejection::UnsupportedVideoSize => "hardware_size_unsupported",
+            };
+            crate::trace::diagnostic(
+                serde_json::json!({
+                    "event": "ohos_avcodec_capability",
+                    "stage": stage,
+                    "codec": "av1",
+                    "codecName": codec_name.map(CStr::to_string_lossy),
+                    "width": width,
+                    "height": height,
+                })
+                .to_string(),
+            );
+            Err(match rejection {
+                HardwareAv1CapabilityRejection::Unavailable => {
+                    "no HarmonyOS hardware AV1 decoder capability is available".to_string()
+                }
+                HardwareAv1CapabilityRejection::EmptyCodecName => {
+                    "HarmonyOS hardware AV1 decoder capability has no valid codec name".to_string()
+                }
+                HardwareAv1CapabilityRejection::UnsupportedVideoSize => {
+                    format!("HarmonyOS hardware AV1 decoder does not support {width}x{height}")
+                }
+            })
+        }
+    }
+}
+
+fn avcodec_initialization_failure_stage(reason: &str) -> &'static str {
+    if reason.contains("RegisterCallback") {
+        "register_callback"
+    } else if reason.contains("CreateVideoFormat") {
+        "create_format"
+    } else if reason.contains("SetIntValue") || reason.contains("SetBuffer") {
+        "set_format"
+    } else if reason.contains("_Configure") {
+        "configure"
+    } else if reason.contains("SetSurface") {
+        "set_surface"
+    } else if reason.contains("_Prepare") {
+        "prepare"
+    } else if reason.contains("_Start") {
+        "start"
+    } else {
+        "initialize"
+    }
 }
 
 fn avcc_to_annex_b(config: &[u8]) -> Result<(Vec<u8>, Option<usize>), String> {

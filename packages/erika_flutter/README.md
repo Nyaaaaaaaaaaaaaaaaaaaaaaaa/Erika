@@ -276,11 +276,12 @@ Use `ErikaVideoView` on HarmonyOS. It registers a Flutter external texture,
 obtains the texture surface as an `OHNativeWindow`, and renders through wgpu
 Vulkan. Audio uses OHAudio with interleaved f32 PCM.
 
-This AV1/AVIF-specialized fork defaults to dav1d software decoding on HarmonyOS.
-The retained AVCodec integration only supports H.264/HEVC and is therefore not
-selected for supported media. dav1d frames use the existing CPU-upload path to
-the Vulkan compositor. The dormant AVCodec surface integration remains in the
-package for ABI/source compatibility but is outside this fork's media contract.
+This AV1/AVIF-specialized fork queries the hardware-only `video/av1` AVCodec
+capability and validates the coded size before creating the decoder by its
+reported codec name. It never selects the recommended software AVCodec: missing
+capability, unsupported dimensions, or any open/runtime failure falls back
+directly to dav1d. Surface output uses the NativeBuffer/Vulkan path; AVCodec
+buffer output and dav1d use CPU upload. Static AVIF follows the same policy.
 
 ## HTTP Headers
 

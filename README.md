@@ -27,8 +27,8 @@ H.264、HEVC/HEIC、VP8/VP9、MPEG、JPEG、PNG、WebP 和纯音频输入会通�
 
 ## 特性
 
-- **AV1 硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)，不可用时明确回退 AV1 软解；HarmonyOS 直接使用 dav1d
-- **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan；软件帧走明确的 CPU upload
+- **AV1 硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android) 与硬件类别 AVCodec (HarmonyOS)，不可用时明确回退 dav1d
+- **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan、HarmonyOS AVCodec Surface → NativeBuffer/Vulkan；buffer 输出和软件帧走明确的 CPU upload
 - **HDR/EDR 输出** — Apple EDR、Windows HDR10，以及 Android FP16 extended-linear scRGB 协商与明确 SDR 回退
 - **原生 Metal 渲染器** — YCbCr 采样、色彩空间转换和 tone mapping，一次 render pass 完成 (macOS/iOS/tvOS)
 - **原生 Direct3D 11 渲染器** — Windows: D3D11VA 零拷贝纹理互操作、YCbCr 采样和 HDR10 输出
@@ -124,7 +124,7 @@ Erika 提供两组 C ABI 入口，适配不同嵌入场景：
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **可用** |
 | Linux | — | wgpu (planned) | — | 规划中 |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
-| HarmonyOS API 18+ | AV1 dav1d 软件解码 | wgpu (Vulkan) | OHAudio | **可用** |
+| HarmonyOS API 18+ | AV1 硬件 AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **可用**；硬件路径仍需真机验收 |
 
 ## 仓库结构
 

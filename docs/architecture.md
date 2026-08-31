@@ -52,11 +52,13 @@ cargo run -p xtask -- deps status
 - **Demuxer** — owns `AVFormatContext`, optionally with a Rust-backed custom
   `AVIOContext` from `MediaSource`. Supports stream selection, reference-counted
   packets, and timestamp-based seek.
-- **Decoder** — AV1 software plus VideoToolbox, D3D11VA/DXVA2, and MediaCodec
-  hardware backends. Software AV1 on every target selects source-built
-  `libdav1d`; OpenHarmony selects it directly because its retained AVCodec bridge
-  exposes only AVC/HEVC. Hardware frames preserve color metadata for the
-  renderer's platform-specific import or upload path.
+- **Decoder** — AV1 software plus VideoToolbox, D3D11VA/DXVA2, MediaCodec, and
+  OpenHarmony AVCodec hardware backends. Software AV1 on every target selects
+  source-built `libdav1d`. OpenHarmony queries only hardware-category
+  `video/av1` capability, validates the coded size, and creates the returned
+  codec by name; it never selects a system software AVCodec. Hardware frames
+  preserve color metadata for the renderer's platform-specific import or upload
+  path.
 - **AudioResampler** — wraps `libswresample`, converts to interleaved f32 PCM
   (default 48 kHz stereo).
 
@@ -185,9 +187,10 @@ Second renderer backend for portability:
   values as if they were SDR pixels.
 - Surface handle model covers macOS NSView, iOS UIView, Windows HWND,
   X11/Wayland, Android native windows, OpenHarmony `OHNativeWindow`.
-- The retained OpenHarmony AVCodec Surface import remains ABI-compatible but is
-  not selected for supported media because that bridge has no AV1 path.
-  Source-built dav1d output reaches the wgpu compositor through CPU upload.
+- OpenHarmony AV1 AVCodec Surface output uses the existing NativeBuffer import.
+  Without a surface, AVCodec buffer output uses CPU upload but remains hardware
+  decode. Capability, size, open, runtime, seek-reopen, or import failure falls
+  directly to source-built dav1d; no system software AVCodec is attempted.
   Devices without the required Vulkan extensions fall back to software decode
   and CPU upload, and the fallback is reported through the diagnostics events.
 - Android has bounded Vulkan/GLES backend recovery and explicit import,
@@ -306,4 +309,4 @@ See `docs/flutter_embedding.md` for the embedding model and HDR strategy.
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | Available |
 | Linux | — | wgpu (planned) | — | Planned |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu Vulkan with GLES fallback | AAudio | Available; this fork still requires device acceptance |
-| HarmonyOS API 18+ | AV1 dav1d software | wgpu Vulkan | OHAudio | Available; this fork still requires device acceptance |
+| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu Vulkan | OHAudio | Available; hardware-path device acceptance remains pending |

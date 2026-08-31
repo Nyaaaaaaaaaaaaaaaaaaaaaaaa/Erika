@@ -45,7 +45,7 @@ cargo run -p xtask -- deps status
 `erika_ffmpeg_sys` は build 時に bindgen で低レベルバインディングを生成します。`erika::ffmpeg` は安全な Rust ラッパーを提供します。
 
 - **Demuxer**: `AVFormatContext` を保持し、`MediaSource` 由来の Rust-backed custom `AVIOContext` を使うこともできます。stream selection、reference-counted packets、timestamp-based seek をサポートします。
-- **Decoder**: AV1 software decode と VideoToolbox、D3D11VA/DXVA2、MediaCodec hardware backend を持ちます。全ターゲットで source-built dav1d に fallback し、OpenHarmony は保持された AVCodec bridge が AVC/HEVC のみ対応するため dav1d を直接選択します。
+- **Decoder**: AV1 software decode と VideoToolbox、D3D11VA/DXVA2、MediaCodec、OpenHarmony AVCodec hardware backend を持ちます。全ターゲットで source-built dav1d に fallback します。OpenHarmony は hardware category の `video/av1` capability のみを照会し、coded size を検証して返された codec name で instance を作成します。system software AVCodec は選択しません。
 - **AudioResampler**: `libswresample` を包み、interleaved f32 PCM（既定 48 kHz stereo）へ変換します。
 
 ## 再生エンジン
@@ -122,7 +122,7 @@ Windows のネイティブ renderer（`renderer/d3d11.rs`）：
 - bounded feature texture と source-sized packed DepthToSpace output を使う tiled ArtCNN C4F16/C4F16 DS/C4F32 compute（`renderer/wgpu_artcnn.rs`）。native luma と Android の converted nonlinear RGB の両方を扱い、`rgb + (Y_sr - Y)` で chroma を保持します。GLES 3.0 は compute を試さず、`Inactive` と `native_luma_sampling` fallback を明示します。
 - subtitle/danmaku composite、frame capture、headless testing 用 offscreen target。display surface が extended-linear の場合も screenshot は常に SDR RGBA8 target へ offscreen render し、未マップの scRGB 値を SDR pixel として返しません。
 - surface handle model は macOS NSView、iOS UIView、Windows HWND、X11/Wayland、Android native window、OpenHarmony `OHNativeWindow` をカバーします。
-- OpenHarmony の AVCodec Surface import は ABI compatibility のため保持しますが、その bridge に AV1 path がないため supported media では選択しません。source-built dav1d の出力は CPU upload で wgpu compositor に渡します。
+- OpenHarmony の AV1 AVCodec Surface output は既存の NativeBuffer import を使います。Surface がない場合の AVCodec buffer output は CPU upload ですが hardware decode のままです。capability、size、open、runtime、seek reopen、import failure は直接 source-built dav1d へ fallback し、system software AVCodec は試しません。
 - Android は bounded Vulkan/GLES backend recovery と import/capability/quality/device-failure diagnostics を備えます。high-headroom output は FP16 **extended-linear scRGB** であり HDR10/PQ ではありません。renderer は `Rgba16Float`、Vulkan extended-sRGB-linear color space を使い、configure/reconfigure ごとに `ANativeWindow` の `ADATASPACE_SCRGB_LINEAR`（`0x18410000`）を検証します。Android scRGB は BT.709 primaries、`1.0 = 80 nit` で、PQ や HDR10 static metadata は出力しません。
 - Extended-linear が active になる条件は、`ExtendedLinear` の明示要求、HDR 対応 display/surface、Flutter Hybrid Composition の `SurfaceView`、Vulkan wgpu backend、surface の `Rgba16Float` 対応、`SCRGB_LINEAR` dataspace readback 成功です。どれかが欠けると通常の SDR surface を直ちに選び、安定 ABI の fallback reason `0..8` を記録します。そのため GLES と `TextureView` は SDR path です。
 - API 34+ では Android host が `Display.registerHdrSdrRatioChangedListener` で display を監視し、実際の変化を `erika_presenter_set_output_headroom` で Erika に publish します。wgpu は surface を reattach せず、後続 frame の effective content headroom と queryable output status を更新します。ratio が available なら `activeHeadroomKnown` は true で、known flag または ratio が実際に変わった場合だけ `headroomUpdates` が増えます。
@@ -182,4 +182,4 @@ embedding model と HDR strategy は `docs/flutter_embedding.md` を参照して
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | Available |
 | Linux | — | wgpu (planned) | — | Planned |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu Vulkan + GLES fallback | AAudio | Available。この fork は実機 acceptance 未実施 |
-| HarmonyOS API 18+ | AV1 dav1d software | wgpu Vulkan | OHAudio | Available。この fork は実機 acceptance 未実施 |
+| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu Vulkan | OHAudio | Available。hardware path の実機 acceptance は未実施 |

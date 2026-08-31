@@ -69,11 +69,12 @@ texture を登録し、その texture の surface を `OHNativeWindow` として
 presenter に attach します。wgpu はその上で Vulkan 描画を行い、window system
 integration には `VK_OHOS_surface` を使います。
 
-この AV1/AVIF 専用 fork は、保持された AVCodec bridge が H.264/HEVC のみ対応するため、
-HarmonyOS で source-built dav1d を直接選択します。dav1d frame は CPU upload で
-subtitle、danmaku、overlay と同じ wgpu pass に入ります。AVCodec Surface path は
-ABI/source compatibility のためだけに保持され、supported media の対象外です。
-この fork の HarmonyOS 実機 acceptance は未実施です。
+この AV1/AVIF 専用 fork は HarmonyOS で hardware category の `video/av1` AVCodec
+capability のみを照会し、coded size を検証して返された codec name で decoder を
+作成します。system software AVCodec は選択しません。Surface output は既存の
+NativeBuffer import、buffer output は CPU upload を使い、capability、open、runtime、
+seek reopen、import failure は直接 dav1d へ fallback します。hardware path の実機
+acceptance は未実施です。
 
 ## 透明 video と blend mode
 

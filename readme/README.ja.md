@@ -24,8 +24,8 @@ package 名、cross-platform rendering interface を維持し、visual media を
 
 ## 機能
 
-- **AV1 hardware decode** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)。利用不可時は AV1 software decode へ fallbackし、HarmonyOS は dav1d を直接選択
-- **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)。software frame は明示的な CPU upload を使用
+- **AV1 hardware decode** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)、hardware category AVCodec (HarmonyOS)。利用不可時は明示的に dav1d へ fallback
+- **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)、AVCodec Surface → NativeBuffer/Vulkan (HarmonyOS)。buffer output と software frame は明示的な CPU upload を使用
 - **HDR/EDR 出力** -- Apple EDR、Windows HDR10、Android FP16 extended-linear scRGB negotiation と明示的な SDR fallback
 - **Metal ネイティブレンダラー** -- YCbCr サンプリング、色空間変換、トーンマッピングを単一レンダーパスで実行 (macOS/iOS/tvOS)
 - **Direct3D 11 ネイティブレンダラー** -- Windows: D3D11VA ゼロコピーテクスチャ相互運用、YCbCr サンプリング、HDR10 出力
@@ -116,7 +116,7 @@ prebuilt mode は明示的に失敗し、upstream の full-codec binary へ fall
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **利用可能** |
 | Linux | -- | wgpu (計画中) | -- | 計画中 |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **利用可能**。この fork の実機 acceptance は未実施 |
-| HarmonyOS API 18+ | AV1 dav1d software decode | wgpu (Vulkan) | OHAudio | **利用可能**。この fork の実機 acceptance は未実施 |
+| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **利用可能**。hardware path の実機 acceptance は未実施 |
 
 ## リポジトリ構成
 

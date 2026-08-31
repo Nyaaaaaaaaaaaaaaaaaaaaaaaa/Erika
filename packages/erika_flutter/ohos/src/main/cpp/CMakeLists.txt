@@ -153,6 +153,36 @@ endif()
 set(OHOS_BINDGEN_ARGS
   "--target=${ERIKA_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -isystem ${OHOS_CXX_INCLUDE}"
 )
+set(OHOS_CARGO_LINKER
+  "${OHOS_LLVM_BIN}/aarch64-unknown-linux-ohos-clang"
+)
+set(OHOS_CARGO_CC "${OHOS_CARGO_LINKER}")
+set(OHOS_CARGO_CXX
+  "${OHOS_LLVM_BIN}/aarch64-unknown-linux-ohos-clang++"
+)
+set(OHOS_CARGO_AR "${OHOS_LLVM_BIN}/llvm-ar")
+set(OHOS_LIBCLANG_PATH "${OHOS_SDK_NATIVE}/llvm/lib")
+set(OHOS_CARGO_EXTRA_ENV)
+if(CMAKE_HOST_WIN32)
+  # The Windows SDK's target-prefixed drivers are POSIX shell scripts. Cargo
+  # and cc-rs launch their tools directly, so select the native executables
+  # and reproduce the wrapper flags explicitly.
+  set(OHOS_CLANG_TARGET aarch64-linux-ohos)
+  set(OHOS_CARGO_LINKER "${OHOS_LLVM_BIN}/clang.exe")
+  set(OHOS_CARGO_CC "${OHOS_LLVM_BIN}/clang.exe")
+  set(OHOS_CARGO_CXX "${OHOS_LLVM_BIN}/clang++.exe")
+  set(OHOS_CARGO_AR "${OHOS_LLVM_BIN}/llvm-ar.exe")
+  set(OHOS_LIBCLANG_PATH "${OHOS_LLVM_BIN}")
+  set(OHOS_BINDGEN_ARGS
+    "--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -isystem ${OHOS_CXX_INCLUDE}"
+  )
+  list(APPEND OHOS_CARGO_EXTRA_ENV
+    "BINDGEN_EXTRA_CLANG_ARGS=${OHOS_BINDGEN_ARGS}"
+    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS=-C link-arg=--target=${OHOS_CLANG_TARGET} -C link-arg=--sysroot=${OHOS_SDK_NATIVE}/sysroot"
+    "CFLAGS_aarch64_unknown_linux_ohos=--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -D__MUSL__ -fPIC"
+    "CXXFLAGS_aarch64_unknown_linux_ohos=--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -D__MUSL__ -fPIC"
+  )
+endif()
 if(NOT ERIKA_USE_PREBUILT)
   find_program(CARGO_EXECUTABLE cargo REQUIRED)
   file(GLOB_RECURSE ERIKA_RUST_SOURCES CONFIGURE_DEPENDS
@@ -177,12 +207,13 @@ if(NOT ERIKA_USE_PREBUILT)
         "ERIKA_NATIVE_PROFILE=lgpl"
         "ERIKA_NATIVE_TARGET=${ERIKA_TARGET}"
         "OHOS_NDK_HOME=${OHOS_SDK_NATIVE}"
-        "LIBCLANG_PATH=${OHOS_SDK_NATIVE}/llvm/lib"
+        "LIBCLANG_PATH=${OHOS_LIBCLANG_PATH}"
         "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_ohos=${OHOS_BINDGEN_ARGS}"
-        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=${OHOS_LLVM_BIN}/aarch64-unknown-linux-ohos-clang"
-        "CC_aarch64_unknown_linux_ohos=${OHOS_LLVM_BIN}/aarch64-unknown-linux-ohos-clang"
-        "CXX_aarch64_unknown_linux_ohos=${OHOS_LLVM_BIN}/aarch64-unknown-linux-ohos-clang++"
-        "AR_aarch64_unknown_linux_ohos=${OHOS_LLVM_BIN}/llvm-ar"
+        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=${OHOS_CARGO_LINKER}"
+        "CC_aarch64_unknown_linux_ohos=${OHOS_CARGO_CC}"
+        "CXX_aarch64_unknown_linux_ohos=${OHOS_CARGO_CXX}"
+        "AR_aarch64_unknown_linux_ohos=${OHOS_CARGO_AR}"
+        ${OHOS_CARGO_EXTRA_ENV}
         "${CARGO_EXECUTABLE}" build -p erika_capi
         --target "${ERIKA_TARGET}" --release
         --no-default-features --features wgpu

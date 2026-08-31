@@ -601,10 +601,7 @@ impl Default for VideoDecodePreference {
 #[cfg(target_env = "ohos")]
 impl Default for VideoDecodePreference {
     fn default() -> Self {
-        // Erika's OpenHarmony AVCodec bridge currently exposes AVC/HEVC only.
-        // This AV1/AVIF-specialized fork therefore selects libdav1d directly
-        // instead of attempting an unsupported hardware open before fallback.
-        Self::Software
+        Self::AvCodec
     }
 }
 
@@ -6585,6 +6582,15 @@ mod tests {
             DecoderBackend::MediaCodec,
             None
         ));
+        assert!(should_fallback_video_decoder_open_error(
+            DecoderBackend::AvCodec,
+            Some("av1")
+        ));
+        assert_eq!(
+            video_decoder_open_stage(DecoderConfig::avcodec()),
+            "open_avcodec",
+            "HarmonyOS uses one direct AVCodec-to-dav1d open fallback"
+        );
         assert!(!should_fallback_video_decoder_open_error(
             DecoderBackend::VideoToolbox,
             Some("h264")

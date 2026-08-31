@@ -199,10 +199,11 @@ HarmonyOS 使用 AVSession 发布媒体元数据、封面、播放状态、进�
 HarmonyOS 上请使用 `ErikaVideoView`。它注册 Flutter 外部纹理，把纹理 surface 取为
 `OHNativeWindow`，并通过 wgpu Vulkan 渲染。音频走 OHAudio，交错 f32 PCM。
 
-此 AV1/AVIF 专用 fork 在 HarmonyOS 上默认使用 dav1d 软件解码。保留的 AVCodec
-集成只支持 H.264/HEVC，因此不会用于本 fork 支持的媒体。dav1d 帧通过现有 CPU
-upload 路径进入 Vulkan 合成器。AVCodec Surface 集成仅为 ABI/源码兼容而保留，
-不属于此 fork 的媒体支持范围。
+此 AV1/AVIF 专用 fork 在 HarmonyOS 上只查询硬件类别的 `video/av1` AVCodec
+capability，校验编码尺寸后用返回的 codec name 创建 decoder；不会选择系统推荐的
+软件 AVCodec。无硬件能力、尺寸不支持或打开/运行失败时直接回退 dav1d。Surface
+输出走 NativeBuffer/Vulkan，AVCodec buffer 输出与 dav1d 走 CPU upload；静态 AVIF
+遵循同一策略。
 
 ## HTTP 请求头
 

@@ -27,8 +27,8 @@ accepting only these visual formats:
 
 ## Features
 
-- **AV1 hardware decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA/DXVA2 (Windows), and MediaCodec (Android), with explicit AV1 software fallback; HarmonyOS selects dav1d directly
-- **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), and MediaCodec Surface to AHardwareBuffer/Vulkan (Android), with explicit CPU upload for software frames
+- **AV1 hardware decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA/DXVA2 (Windows), MediaCodec (Android), and hardware-category AVCodec (HarmonyOS), with explicit dav1d fallback
+- **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), MediaCodec Surface to AHardwareBuffer/Vulkan (Android), and AVCodec Surface to NativeBuffer/Vulkan (HarmonyOS), with explicit CPU upload for buffer output and software frames
 - **HDR/EDR output** -- Apple EDR, Windows HDR10, and Android FP16 extended-linear scRGB negotiation with explicit SDR fallback
 - **Native Metal renderer** -- YCbCr sampling, color space conversion, and tone mapping in a single render pass (macOS/iOS/tvOS)
 - **Native Direct3D 11 renderer** -- Windows: D3D11VA zero-copy texture interop, YCbCr sampling, and HDR10 output
@@ -120,7 +120,7 @@ Header: [`crates/erika_capi/include/erika.h`](../crates/erika_capi/include/erika
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **Available** |
 | Linux | -- | wgpu (planned) | -- | Planned |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **Available**; device acceptance for this fork remains pending |
-| HarmonyOS API 18+ | AV1 dav1d software decode | wgpu (Vulkan) | OHAudio | **Available**; device acceptance for this fork remains pending |
+| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **Available**; hardware-path device acceptance remains pending |
 
 ## Repository Structure
 

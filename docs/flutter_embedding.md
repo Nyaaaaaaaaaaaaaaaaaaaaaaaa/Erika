@@ -101,11 +101,12 @@ external texture, takes that texture's surface as an `OHNativeWindow`, and
 attaches it to the presenter; wgpu then renders through Vulkan, using
 `VK_OHOS_surface` for window-system integration.
 
-This AV1/AVIF-only fork selects source-built dav1d directly on HarmonyOS because
-the retained AVCodec bridge exposes only H.264/HEVC. dav1d frames use CPU upload
-into the same wgpu pass as subtitles, danmaku, and overlays. The AVCodec Surface
-path remains only for ABI/source compatibility and is outside the supported
-media contract. Device-side acceptance for this fork remains pending.
+This AV1/AVIF-only fork queries only the hardware-category `video/av1` AVCodec
+capability on HarmonyOS, validates the coded size, and creates the decoder by
+the reported codec name. It never selects a system software AVCodec. Surface
+output uses the existing NativeBuffer import; buffer output uses CPU upload.
+Any capability, open, runtime, seek-reopen, or import failure falls directly to
+dav1d. Device-side hardware-path acceptance remains pending.
 
 ## Transparent Video and Blend Modes
 

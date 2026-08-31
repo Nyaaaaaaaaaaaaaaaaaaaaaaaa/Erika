@@ -9,7 +9,7 @@
 | tvOS | AV1 VideoToolbox/dav1d + Metal | 是 | CI；此 fork 尚无 XCFramework | 此 fork 需重新真机验收 |
 | Windows x64/ARM64 | AV1 D3D11VA/DXVA2/软解 + D3D11 | 是 | CI；此 fork 尚无预编译包 | 此 fork 需重新真机验收 |
 | Android | AV1 MediaCodec/dav1d + wgpu | 是 | CI；此 fork 尚无预编译包 | 此 fork 需重新真机验收 |
-| HarmonyOS | AV1 dav1d 软解 + wgpu Vulkan | 是 | 此 fork 尚无预编译包 | 此 fork 需重新真机验收 |
+| HarmonyOS | AV1 硬件 AVCodec/dav1d + wgpu Vulkan | 是 | 此 fork 尚无预编译包 | 硬件路径需重新真机验收 |
 | Linux | 规划中的 wgpu 路径 | 不作为发布承诺 | 无正式预编译发布 | 未验收 |
 
 ## surface 与嵌入选择

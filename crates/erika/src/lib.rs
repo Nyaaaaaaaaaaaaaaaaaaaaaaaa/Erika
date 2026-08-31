@@ -9,6 +9,8 @@ pub mod debug_hud;
 pub mod ffmpeg;
 #[cfg(target_env = "ohos")]
 pub mod ohos;
+#[cfg(any(target_env = "ohos", test))]
+mod ohos_av1;
 pub mod overlay;
 pub mod playback;
 pub mod presenter;
