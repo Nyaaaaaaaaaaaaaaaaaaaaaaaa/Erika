@@ -190,6 +190,7 @@ fi
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=appletvsimulator*]' => 'i386',
     'OTHER_LDFLAGS' => erika_link_flags,
+    'OTHER_LIBTOOLFLAGS' => '$(inherited) "$(BUILT_PRODUCTS_DIR)/liberika_capi.a"',
   }
   s.user_target_xcconfig = {
     'OTHER_LDFLAGS' => erika_link_flags,
