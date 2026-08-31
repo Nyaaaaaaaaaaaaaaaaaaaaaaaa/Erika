@@ -112,6 +112,12 @@ void main() {
       expect(podspec, contains('s.static_framework = true'), reason: path);
       expect(podspec, contains('s.vendored_libraries'), reason: path);
       expect(podspec, contains('s.preserve_paths'), reason: path);
+      expect(podspec, contains('LIPO_INPUTS'), reason: path);
+      expect(
+        podspec,
+        contains('lipo -verify_arch arm64 x86_64'),
+        reason: path,
+      );
       expect(
         podspec,
         isNot(contains(r'$(BUILT_PRODUCTS_DIR)/liberika_capi.a')),

@@ -97,18 +97,11 @@ fi
 
 case "${PLATFORM_NAME:-appletvos}" in
   appletvos)
-    RUST_TARGET="aarch64-apple-tvos"
-    BINDGEN_CLANG_TARGET="arm64-apple-tvos"
+    RUST_TARGETS="aarch64-apple-tvos"
     BINDGEN_SDK="appletvos"
     ;;
   appletvsimulator)
-    if [ "$ARCH" = "x86_64" ]; then
-      RUST_TARGET="x86_64-apple-tvos"
-      BINDGEN_CLANG_TARGET="x86_64-apple-tvos-simulator"
-    else
-      RUST_TARGET="aarch64-apple-tvos-sim"
-      BINDGEN_CLANG_TARGET="arm64-apple-tvos-simulator"
-    fi
+    RUST_TARGETS="aarch64-apple-tvos-sim x86_64-apple-tvos"
     BINDGEN_SDK="appletvsimulator"
     ;;
   *)
@@ -161,29 +154,55 @@ else
   fi
   export TVOS_DEPLOYMENT_TARGET="${TVOS_DEPLOYMENT_TARGET:-13.0}"
   BINDGEN_SDKROOT="$(xcrun --sdk "$BINDGEN_SDK" --show-sdk-path)"
-  BINDGEN_TARGET_ENV="$(echo "$RUST_TARGET" | tr '-' '_')"
-  export "BINDGEN_EXTRA_CLANG_ARGS_$BINDGEN_TARGET_ENV=--target=$BINDGEN_CLANG_TARGET -isysroot $BINDGEN_SDKROOT"
+  ERIKA_FFMPEG_OVERRIDE="${ERIKA_FFMPEG_DIR:-}"
+  ERIKA_DAV1D_OVERRIDE="${ERIKA_DAV1D_DIR:-}"
+  ERIKA_LIBASS_OVERRIDE="${ERIKA_LIBASS_DIR:-}"
+  ERIKA_FREETYPE_OVERRIDE="${ERIKA_FREETYPE_DIR:-}"
+  ERIKA_HARFBUZZ_OVERRIDE="${ERIKA_HARFBUZZ_DIR:-}"
+  ERIKA_FRIBIDI_OVERRIDE="${ERIKA_FRIBIDI_DIR:-}"
+  LIPO_INPUTS=""
 
-  ERIKA_TARGET_DIST="$SOURCE_ROOT/third_party/dist/$RUST_TARGET/$ERIKA_NATIVE_PROFILE"
-  ERIKA_FFMPEG_DIR="${ERIKA_FFMPEG_DIR:-$ERIKA_TARGET_DIST/ffmpeg}"
-  ERIKA_DAV1D_DIR="${ERIKA_DAV1D_DIR:-$ERIKA_TARGET_DIST/dav1d}"
-  ERIKA_LIBASS_DIR="${ERIKA_LIBASS_DIR:-$ERIKA_TARGET_DIST/libass}"
-  ERIKA_FREETYPE_DIR="${ERIKA_FREETYPE_DIR:-$ERIKA_TARGET_DIST/freetype}"
-  ERIKA_HARFBUZZ_DIR="${ERIKA_HARFBUZZ_DIR:-$ERIKA_TARGET_DIST/harfbuzz}"
-  ERIKA_FRIBIDI_DIR="${ERIKA_FRIBIDI_DIR:-$ERIKA_TARGET_DIST/fribidi}"
-  ERIKA_DAV1D_MARKER="$SOURCE_ROOT/third_party/build/$RUST_TARGET/$ERIKA_NATIVE_PROFILE/dav1d/dav1d-built.txt"
+  for RUST_TARGET in $RUST_TARGETS; do
+    case "$RUST_TARGET" in
+      aarch64-apple-tvos) BINDGEN_CLANG_TARGET="arm64-apple-tvos" ;;
+      aarch64-apple-tvos-sim) BINDGEN_CLANG_TARGET="arm64-apple-tvos-simulator" ;;
+      x86_64-apple-tvos) BINDGEN_CLANG_TARGET="x86_64-apple-tvos-simulator" ;;
+    esac
+    BINDGEN_TARGET_ENV="$(echo "$RUST_TARGET" | tr '-' '_')"
+    export "BINDGEN_EXTRA_CLANG_ARGS_$BINDGEN_TARGET_ENV=--target=$BINDGEN_CLANG_TARGET -isysroot $BINDGEN_SDKROOT"
 
-  if [ ! -f "$ERIKA_FFMPEG_DIR/include/libavformat/avformat.h" ] || [ ! -f "$ERIKA_DAV1D_DIR/include/dav1d/dav1d.h" ] || [ ! -f "$ERIKA_DAV1D_DIR/lib/libdav1d.a" ] || [ ! -f "$ERIKA_DAV1D_MARKER" ] || ! grep -qx 'dav1d=1.5.1' "$ERIKA_DAV1D_MARKER" || [ ! -f "$ERIKA_LIBASS_DIR/lib/libass.a" ]; then
-    (cd "$SOURCE_ROOT" && cargo run -p xtask -- deps build --all --profile "$ERIKA_NATIVE_PROFILE" --target "$RUST_TARGET" --jobs "$HOST_JOBS")
+    ERIKA_TARGET_DIST="$SOURCE_ROOT/third_party/dist/$RUST_TARGET/$ERIKA_NATIVE_PROFILE"
+    TARGET_FFMPEG_DIR="${ERIKA_FFMPEG_OVERRIDE:-$ERIKA_TARGET_DIST/ffmpeg}"
+    TARGET_DAV1D_DIR="${ERIKA_DAV1D_OVERRIDE:-$ERIKA_TARGET_DIST/dav1d}"
+    TARGET_LIBASS_DIR="${ERIKA_LIBASS_OVERRIDE:-$ERIKA_TARGET_DIST/libass}"
+    TARGET_FREETYPE_DIR="${ERIKA_FREETYPE_OVERRIDE:-$ERIKA_TARGET_DIST/freetype}"
+    TARGET_HARFBUZZ_DIR="${ERIKA_HARFBUZZ_OVERRIDE:-$ERIKA_TARGET_DIST/harfbuzz}"
+    TARGET_FRIBIDI_DIR="${ERIKA_FRIBIDI_OVERRIDE:-$ERIKA_TARGET_DIST/fribidi}"
+    ERIKA_DAV1D_MARKER="$SOURCE_ROOT/third_party/build/$RUST_TARGET/$ERIKA_NATIVE_PROFILE/dav1d/dav1d-built.txt"
+
+    if [ ! -f "$TARGET_FFMPEG_DIR/include/libavformat/avformat.h" ] || [ ! -f "$TARGET_DAV1D_DIR/include/dav1d/dav1d.h" ] || [ ! -f "$TARGET_DAV1D_DIR/lib/libdav1d.a" ] || [ ! -f "$ERIKA_DAV1D_MARKER" ] || ! grep -qx 'dav1d=1.5.1' "$ERIKA_DAV1D_MARKER" || [ ! -f "$TARGET_LIBASS_DIR/lib/libass.a" ]; then
+      (cd "$SOURCE_ROOT" && cargo run -p xtask -- deps build --all --profile "$ERIKA_NATIVE_PROFILE" --target "$RUST_TARGET" --jobs "$HOST_JOBS")
+    fi
+    (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$TARGET_FFMPEG_DIR" ERIKA_DAV1D_DIR="$TARGET_DAV1D_DIR" ERIKA_LIBASS_DIR="$TARGET_LIBASS_DIR" ERIKA_FREETYPE_DIR="$TARGET_FREETYPE_DIR" ERIKA_HARFBUZZ_DIR="$TARGET_HARFBUZZ_DIR" ERIKA_FRIBIDI_DIR="$TARGET_FRIBIDI_DIR" cargo +nightly rustc -Z build-std=std,panic_abort -p erika_capi --target "$RUST_TARGET" --no-default-features --features libass $CARGO_ARGS --lib --crate-type staticlib)
+    LIPO_INPUTS="$LIPO_INPUTS $SOURCE_ROOT/target/$RUST_TARGET/$CARGO_PROFILE/liberika_capi.a"
+  done
+
+  set -- $LIPO_INPUTS
+  if [ "$#" -eq 1 ]; then
+    cp "$1" "$OUTPUT_LIB"
+  else
+    xcrun lipo -create "$@" -output "$OUTPUT_LIB"
   fi
-  (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$ERIKA_FFMPEG_DIR" ERIKA_DAV1D_DIR="$ERIKA_DAV1D_DIR" ERIKA_LIBASS_DIR="$ERIKA_LIBASS_DIR" ERIKA_FREETYPE_DIR="$ERIKA_FREETYPE_DIR" ERIKA_HARFBUZZ_DIR="$ERIKA_HARFBUZZ_DIR" ERIKA_FRIBIDI_DIR="$ERIKA_FRIBIDI_DIR" cargo +nightly rustc -Z build-std=std,panic_abort -p erika_capi --target "$RUST_TARGET" --no-default-features --features libass $CARGO_ARGS --lib --crate-type staticlib)
-  cp "$SOURCE_ROOT/target/$RUST_TARGET/$CARGO_PROFILE/liberika_capi.a" "$OUTPUT_LIB"
 fi
 
 if [ ! -f "$OUTPUT_LIB" ]; then
   echo "error: Erika C ABI static library not found: $OUTPUT_LIB" >&2
   exit 1
 fi
+case "${PLATFORM_NAME:-appletvos}" in
+  appletvos) xcrun lipo -verify_arch arm64 "$OUTPUT_LIB" ;;
+  appletvsimulator) xcrun lipo -verify_arch arm64 x86_64 "$OUTPUT_LIB" ;;
+esac
 if [ -f "$OBJROOT/XCBuildData/build.db" ]; then
   ln -fs "$OBJROOT/XCBuildData/build.db" "$BUILT_PRODUCTS_DIR/erika_capi_phony"
 fi

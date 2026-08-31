@@ -110,7 +110,7 @@ jobs:
         include:
           - name: iOS simulator
             platform: ios
-            build: flutter build ios --simulator --debug --no-codesign --verbose
+            build: flutter build ios --simulator --debug --no-codesign
           - name: macOS
             platform: macos
             build: flutter build macos --debug
@@ -128,7 +128,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: third_party
-          key: erika-flutter-${{ matrix.platform }}-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: erika-flutter-${{ matrix.platform }}-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**', 'packages/erika_flutter/ios/*.podspec', 'packages/erika_flutter/tvos/*.podspec', 'packages/erika_flutter/macos/*.podspec') }}
+          restore-keys: erika-flutter-${{ matrix.platform }}-source-
           save-always: true
       - name: Create isolated consumer
         shell: bash
