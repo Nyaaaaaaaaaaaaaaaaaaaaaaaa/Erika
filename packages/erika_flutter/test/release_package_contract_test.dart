@@ -104,16 +104,23 @@ void main() {
       final podspec = File(path).readAsStringSync();
       expect(
         podspec,
-        contains(r'$(BUILT_PRODUCTS_DIR)/liberika_capi.a'),
+        contains(r'${PODS_TARGET_SRCROOT}/native/liberika_capi.a'),
         reason: path,
       );
       expect(podspec, contains('s.pod_target_xcconfig'), reason: path);
       expect(podspec, contains('s.user_target_xcconfig'), reason: path);
-      expect(podspec, contains('OTHER_LIBTOOLFLAGS'), reason: path);
+      expect(podspec, contains('s.vendored_libraries'), reason: path);
+      expect(podspec, contains('s.preserve_paths'), reason: path);
       expect(
         podspec,
-        isNot(contains(r'$(PODS_TARGET_SRCROOT)/native/liberika_capi.a')),
+        isNot(contains(r'$(BUILT_PRODUCTS_DIR)/liberika_capi.a')),
         reason: path,
+      );
+      expect(
+        File('${File(path).parent.path}/native/liberika_capi.a')
+            .readAsBytesSync(),
+        orderedEquals(<int>[0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a]),
+        reason: '$path must ship a valid empty ar placeholder',
       );
     }
   });

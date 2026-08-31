@@ -2,3 +2,5 @@
 # conventional `-- ` mail signature. Do not report those structural bytes as
 # trailing-whitespace errors when patch files are committed as test inputs.
 *.patch -whitespace
+/packages/erika_flutter/ios/native/liberika_capi.a -text
+/packages/erika_flutter/tvos/native/liberika_capi.a -text

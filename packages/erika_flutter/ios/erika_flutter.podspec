@@ -52,7 +52,7 @@ Pod::Spec.new do |s|
   erika_cabi_undefined_flags = erika_cabi_symbols
     .map { |symbol| "-Wl,-u,_#{symbol}" }
     .join(' ')
-  erika_link_flags = "$(inherited) \"$(BUILT_PRODUCTS_DIR)/liberika_capi.a\" #{erika_cabi_undefined_flags} -framework AVFoundation -framework AudioToolbox -framework QuartzCore -framework Metal -framework CoreVideo -framework CoreMedia -framework VideoToolbox -framework CoreText -framework CoreFoundation -framework CoreGraphics -framework Foundation -liconv -lbz2 -lz"
+  erika_link_flags = "$(inherited) #{erika_cabi_undefined_flags} -framework AVFoundation -framework AudioToolbox -framework QuartzCore -framework Metal -framework CoreVideo -framework CoreMedia -framework VideoToolbox -framework CoreText -framework CoreFoundation -framework CoreGraphics -framework Foundation -liconv -lbz2 -lz"
 
   s.name             = 'erika_flutter'
   s.version          = '0.1.7'
@@ -65,6 +65,8 @@ Flutter iOS AV1/static AVIF plugin that hosts a CAMetalLayer and drives Erika th
   s.author           = { 'AimesSoft' => 'dev@aimesoft.com' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
+  s.vendored_libraries = 'native/liberika_capi.a'
+  s.preserve_paths   = 'native/liberika_capi.a'
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
   s.swift_version = '5.0'
@@ -72,7 +74,7 @@ Flutter iOS AV1/static AVIF plugin that hosts a CAMetalLayer and drives Erika th
     :name => 'Build Erika C ABI',
     :execution_position => :before_compile,
     :input_files => ['${BUILT_PRODUCTS_DIR}/erika_capi_phony'],
-    :output_files => ['${BUILT_PRODUCTS_DIR}/liberika_capi.a'],
+    :output_files => ['${PODS_TARGET_SRCROOT}/native/liberika_capi.a'],
     :script => <<-SCRIPT
 set -eu
 
@@ -80,7 +82,7 @@ export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 PLUGIN_IOS_DIR="$(cd "$PODS_TARGET_SRCROOT" && pwd -P)"
 PACKAGE_ROOT="$(cd "$PLUGIN_IOS_DIR/.." && pwd -P)"
-OUTPUT_LIB="$BUILT_PRODUCTS_DIR/liberika_capi.a"
+OUTPUT_LIB="$PODS_TARGET_SRCROOT/native/liberika_capi.a"
 ERIKA_NATIVE_PROFILE="${ERIKA_NATIVE_PROFILE:-lgpl}"
 HOST_JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 ARCH="${CURRENT_ARCH:-}"
@@ -179,7 +181,6 @@ fi
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'OTHER_LDFLAGS' => erika_link_flags,
-    'OTHER_LIBTOOLFLAGS' => '$(inherited) "$(BUILT_PRODUCTS_DIR)/liberika_capi.a"',
   }
   s.user_target_xcconfig = {
     'OTHER_LDFLAGS' => erika_link_flags,

@@ -9,6 +9,8 @@
 /packages/erika_flutter/android/.cxx/
 /packages/erika_flutter/android/build/
 /packages/erika_flutter/android/local.properties
-/packages/erika_flutter/ios/native/
-/packages/erika_flutter/tvos/native/
+/packages/erika_flutter/ios/native/*
+!/packages/erika_flutter/ios/native/liberika_capi.a
+/packages/erika_flutter/tvos/native/*
+!/packages/erika_flutter/tvos/native/liberika_capi.a
 .DS_Store
