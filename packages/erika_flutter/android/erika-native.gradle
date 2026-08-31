@@ -225,33 +225,51 @@ def ndkContainsLibclang = { File ndk ->
     } ?: false
 }
 
+def configuredLibclangDirectory = {
+    def configured = System.getenv("LIBCLANG_PATH")
+    if (configured == null || configured.trim().isEmpty()) {
+        return null
+    }
+    def directory = file(configured)
+    if (!containsLibclang(directory)) {
+        throw new GradleException("LIBCLANG_PATH does not contain libclang: $directory")
+    }
+    return directory
+}
+
+def ndkSupportsBindgen = { File ndk ->
+    ndk.isDirectory() && (
+        configuredLibclangDirectory() != null || ndkContainsLibclang(ndk)
+    )
+}
+
 def resolveNdkDirectory = {
     def configured = System.getenv("ANDROID_NDK_HOME") ?: System.getenv("ANDROID_NDK_ROOT")
     if (configured != null && !configured.trim().isEmpty()) {
         def ndk = file(configured)
-        if (ndk.isDirectory() && ndkContainsLibclang(ndk)) {
+        if (ndkSupportsBindgen(ndk)) {
             return ndk
         }
         throw new GradleException(
-            "Configured Android NDK does not contain the libclang required by bindgen: $ndk",
+            "Configured Android NDK is unavailable and no usable LIBCLANG_PATH was supplied: $ndk",
         )
     }
 
     def agpNdk = android.ndkDirectory
-    if (agpNdk != null && agpNdk.isDirectory() && ndkContainsLibclang(agpNdk)) {
+    if (agpNdk != null && ndkSupportsBindgen(agpNdk)) {
         return agpNdk
     }
 
     def ndkRoot = new File(android.sdkDirectory, "ndk")
     def installed = ndkRoot.listFiles()
-        ?.findAll { it.isDirectory() && ndkContainsLibclang(it) }
+        ?.findAll { ndkSupportsBindgen(it) }
         ?.sort { left, right -> right.name <=> left.name }
     if (installed != null && !installed.isEmpty()) {
         return installed.first()
     }
     throw new GradleException(
-        "No installed Android NDK contains the libclang required by bindgen; " +
-            "set ANDROID_NDK_HOME to a complete NDK or install one through the Android SDK manager",
+        "No usable Android NDK/libclang pair was found; install an NDK that bundles libclang " +
+            "or set LIBCLANG_PATH to a directory containing the system libclang library",
     )
 }
 
