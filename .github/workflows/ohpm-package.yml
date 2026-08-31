@@ -56,6 +56,8 @@ concurrency:
 
 env:
   ERIKA_NATIVE_VERSION: "${{ inputs.version || '0.1.7' }}"
+  ERIKA_NATIVE_PROFILE: lgpl
+  ERIKA_NATIVE_TARGET: aarch64-unknown-linux-ohos
   OHPM_CLI_URL: "https://repo.huaweicloud.com/harmonyos/ohpm/5.1.0/commandline-tools-linux-x64-5.1.0.840.zip"
   OHPM_CLI_SHA256: "1dcefa4741dc289277560b2802040e0c45b433898d8db453d711d5376e0478f1"
 
@@ -68,6 +70,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: aarch64-unknown-linux-ohos
 
       - uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad
         id: ohos_sdk
@@ -84,27 +90,36 @@ jobs:
       - name: Install native package tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build unzip
+          sudo apt-get install -y build-essential cmake make ninja-build pkg-config unzip
 
-      - name: Download and verify the matching Erika runtime
+      - name: Build and stage the matching Erika runtime
         shell: bash
         env:
           NATIVE_ROOT: ${{ steps.ohos_sdk.outputs.ohos_sdk_native }}
         run: |
           set -euo pipefail
-          runtime_dir="$RUNNER_TEMP/erika-runtime"
-          mkdir -p "$runtime_dir" packages/erika_ohos/src/main/cpp
-          native_sha256="$(awk -F= '$1 == "ERIKA_OPENHARMONY_ARM64_SHA256" {print $2; exit}' packages/erika_flutter/native_artifacts.properties)"
-          test -n "$native_sha256"
-          runtime_zip="$runtime_dir/erika-capi-openharmony-arm64.zip"
-          curl --fail --location --retry 5 --retry-all-errors \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${ERIKA_NATIVE_VERSION}/erika-capi-openharmony-arm64.zip" \
-            --output "$runtime_zip"
-          printf '%s  %s\n' "$native_sha256" "$runtime_zip" | sha256sum --check
-          unzip -q "$runtime_zip" -d "$runtime_dir/unpacked"
-          runtime="$(find "$runtime_dir/unpacked" -type f -name liberika_capi.so -print -quit)"
-          test -n "$runtime"
-          cp "$runtime" packages/erika_ohos/src/main/cpp/liberika_capi.so
+          cxx_include="$NATIVE_ROOT/llvm/include/libcxx-ohos/include/c++/v1"
+          if [[ ! -f "$cxx_include/vector" ]]; then
+            cxx_include="$NATIVE_ROOT/llvm/include/c++/v1"
+          fi
+          test -f "$cxx_include/vector"
+          export OHOS_NDK_HOME="$NATIVE_ROOT"
+          export OHOS_SDK_NATIVE="$NATIVE_ROOT"
+          export LIBCLANG_PATH="$NATIVE_ROOT/llvm/lib"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_ohos="--target=aarch64-unknown-linux-ohos --sysroot=$NATIVE_ROOT/sysroot -isystem $cxx_include"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$NATIVE_ROOT/llvm/bin/aarch64-unknown-linux-ohos-clang"
+          export CC_aarch64_unknown_linux_ohos="$NATIVE_ROOT/llvm/bin/aarch64-unknown-linux-ohos-clang"
+          export CXX_aarch64_unknown_linux_ohos="$NATIVE_ROOT/llvm/bin/aarch64-unknown-linux-ohos-clang++"
+          export AR_aarch64_unknown_linux_ohos="$NATIVE_ROOT/llvm/bin/llvm-ar"
+          cargo run --locked -p xtask -- deps build \
+            --profile "$ERIKA_NATIVE_PROFILE" \
+            --target "$ERIKA_NATIVE_TARGET"
+          cargo build --locked -p erika_capi --release \
+            --target "$ERIKA_NATIVE_TARGET" \
+            --no-default-features --features wgpu
+          mkdir -p packages/erika_ohos/src/main/cpp
+          cp "target/$ERIKA_NATIVE_TARGET/release/liberika_capi.so" \
+            packages/erika_ohos/src/main/cpp/liberika_capi.so
           test -f packages/erika_ohos/src/main/cpp/liberika_capi.so
 
       - name: Install Hvigor

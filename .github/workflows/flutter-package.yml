@@ -30,6 +30,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -71,6 +74,9 @@ jobs:
           key: erika-flutter-android-${{ hashFiles('packages/erika_flutter/native_artifacts.properties') }}
       - name: Create isolated consumer
         shell: bash
+        env:
+          ERIKA_FORCE_SOURCE_BUILD: "1"
+          ERIKA_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/erika-android"
@@ -99,10 +105,15 @@ jobs:
             build: flutter build macos --debug
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios-sim,x86_64-apple-ios
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - name: Install native build tools
+        run: brew install nasm meson ninja pkg-config
       - uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/erika-prebuilt-cache
@@ -111,6 +122,8 @@ jobs:
         shell: bash
         env:
           ERIKA_PREBUILT_CACHE_DIR: ${{ runner.temp }}/erika-prebuilt-cache
+          ERIKA_FORCE_SOURCE_BUILD: "1"
+          ERIKA_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/erika-${{ matrix.platform }}"
@@ -128,21 +141,37 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Install native build tools
+        run: brew install nasm meson ninja pkg-config
       - uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/erika-prebuilt-cache
-          key: erika-flutter-tvos-${{ hashFiles('packages/erika_flutter/native_artifacts.properties') }}
-      - name: Verify tvOS simulator runtime
+          path: third_party
+          key: erika-flutter-tvos-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+      - name: Verify source-built tvOS simulator runtime
         shell: bash
         env:
-          ERIKA_PREBUILT_CACHE_DIR: ${{ runner.temp }}/erika-prebuilt-cache
+          TVOS_DEPLOYMENT_TARGET: "13.0"
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/erika-tvos"
           mkdir -p "$root/erika_flutter"
           git archive HEAD:packages/erika_flutter | tar -x -C "$root/erika_flutter"
-          sh "$root/erika_flutter/native/prepare_apple_prebuilt.sh" \
-            tvos appletvsimulator arm64 "$root/liberika_capi.a"
+          cargo run --locked -p xtask -- deps build --all \
+            --profile lgpl --target aarch64-apple-tvos-sim
+          TVOS_SDKROOT="$(xcrun --sdk appletvsimulator --show-sdk-path)"
+          export SDKROOT="$TVOS_SDKROOT"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_tvos_sim="--target=arm64-apple-tvos${TVOS_DEPLOYMENT_TARGET}-simulator -isysroot $TVOS_SDKROOT"
+          ERIKA_NATIVE_PROFILE=lgpl \
+          ERIKA_NATIVE_TARGET=aarch64-apple-tvos-sim \
+            cargo +nightly rustc -Z build-std=std,panic_abort --locked \
+              -p erika_capi --lib --release \
+              --target aarch64-apple-tvos-sim \
+              --no-default-features --features libass --crate-type staticlib
+          cp target/aarch64-apple-tvos-sim/release/liberika_capi.a \
+            "$root/liberika_capi.a"
           lipo -info "$root/liberika_capi.a" | grep -Eq 'arm64|Non-fat'
 
   windows:
@@ -152,12 +181,43 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          update: false
+          path-type: inherit
+          install: >-
+            make
+            tar
+            diffutils
+            coreutils
+            pkgconf
+            perl
+            zip
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - name: Install native build tools
+        shell: pwsh
+        run: |
+          choco install -y --no-progress nasm zip
+          pip install --quiet meson ninja
+          $llvmBin = "C:\Program Files\LLVM\bin"
+          if (-not (Test-Path (Join-Path $llvmBin "libclang.dll"))) {
+            choco install llvm -y --no-progress
+          }
+          "MSYS2_ROOT=C:\msys64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIBCLANG_PATH=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\NASM"
       - name: Create isolated consumer
         shell: pwsh
+        env:
+          ERIKA_FORCE_SOURCE_BUILD: "1"
+          ERIKA_REPO_ROOT: ${{ github.workspace }}
         run: |
           $root = Join-Path $env:RUNNER_TEMP "erika-windows"
           $package = Join-Path $root "erika_flutter"
@@ -176,6 +236,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: aarch64-unknown-linux-ohos
       - name: Setup OpenHarmony SDK
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad
@@ -186,11 +249,13 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          sudo apt-get install -y build-essential cmake make ninja-build pkg-config
       - name: Build isolated bridge
         shell: bash
         env:
           NATIVE_ROOT: ${{ steps.ohos_sdk.outputs.ohos_sdk_native }}
+          ERIKA_FORCE_SOURCE_BUILD: "1"
+          ERIKA_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/erika-ohos"

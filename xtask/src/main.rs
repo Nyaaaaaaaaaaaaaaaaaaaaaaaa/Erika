@@ -1151,6 +1151,13 @@ fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
 
     let meson = ensure_meson_tools(layout)?;
     let asm_enabled = dav1d_asm_enabled(options.target);
+    let gas_preprocessor_dir = if dav1d_requires_gas_preprocessor(options.target) {
+        ensure_gas_preprocessor(layout)?
+            .parent()
+            .map(Path::to_path_buf)
+    } else {
+        None
+    };
     println!(
         "configure dav1d for {} (asm={asm_enabled})",
         options.target.triple().unwrap_or("host")
@@ -1176,6 +1183,9 @@ fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
     }
     apply_meson_target(&mut setup, layout, options.target, "dav1d")?;
     apply_windows_target_env(&mut setup, options.target)?;
+    if let Some(dir) = gas_preprocessor_dir.as_deref() {
+        prepend_path_to_command(&mut setup, dir);
+    }
     run(&mut setup)?;
     meson_compile_install(
         &meson,
@@ -1236,6 +1246,10 @@ fn dav1d_requires_nasm(target: NativeTarget) -> bool {
             | NativeTarget::X86_64WindowsMsvc
             | NativeTarget::X86_64Android
     )
+}
+
+fn dav1d_requires_gas_preprocessor(target: NativeTarget) -> bool {
+    matches!(target, NativeTarget::Aarch64WindowsMsvc)
 }
 
 fn ffmpeg_requires_nasm(target: NativeTarget) -> bool {
@@ -5075,6 +5089,19 @@ mod tests {
         assert!(dav1d_requires_nasm(NativeTarget::X86_64Android));
         assert!(!dav1d_requires_nasm(NativeTarget::Aarch64Macos));
         assert!(!dav1d_requires_nasm(NativeTarget::Aarch64Ios));
+    }
+
+    #[test]
+    fn windows_arm64_dav1d_requires_gas_preprocessor() {
+        assert!(dav1d_requires_gas_preprocessor(
+            NativeTarget::Aarch64WindowsMsvc
+        ));
+        assert!(!dav1d_requires_gas_preprocessor(
+            NativeTarget::X86_64WindowsMsvc
+        ));
+        assert!(!dav1d_requires_gas_preprocessor(
+            NativeTarget::Aarch64Android
+        ));
     }
 
     #[test]
