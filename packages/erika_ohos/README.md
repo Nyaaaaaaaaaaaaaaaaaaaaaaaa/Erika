@@ -105,8 +105,9 @@ struct VideoPage {
 ```
 
 `renderTick()` returns an `ErikaNativeResponse` for diagnostics and frame
-status. For audio-only playback, use `audioOnlyTick()` instead of rendering a
-surface.
+status. `audioOnlyTick()` remains API-compatible for an AV1 session's ancillary
+audio path; standalone audio-only input is rejected by this AV1/AVIF-specialized
+fork.
 
 ## HTTP options
 

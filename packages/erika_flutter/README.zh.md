@@ -37,10 +37,10 @@ cargo build -p erika_capi
 
 ## 预构建包与源码构建
 
-插件默认下载与当前版本对应的 `v0.1.7` 原生库，并校验 SHA-256。下载失败或校验不一致会明确报错，不会静默回退源码构建。只有在 Erika checkout 中调试源码时才设置 `ERIKA_FORCE_SOURCE_BUILD=1`。自定义 `ERIKA_PREBUILT_TAG` 时，单 ABI 构建须提供对应的 `ERIKA_PREBUILT_SHA256`；Android 多 ABI 构建则须分别提供 `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64` 和 `ERIKA_PREBUILT_SHA256_X86`。完整发布方式见 [发布指南](https://github.com/AimesSoft/Erika/blob/main/docs/releasing.zh.md)。
+插件默认从 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 下载与当前版本对应的 `v0.1.7` 原生库，并校验 SHA-256；可用 `ERIKA_PREBUILT_REPOSITORY=owner/repo` 覆盖。组织发布对应资产前下载会明确失败，不会静默回退源码构建或上游全格式二进制。只有在 Erika checkout 中调试源码时才设置 `ERIKA_FORCE_SOURCE_BUILD=1`。自定义 `ERIKA_PREBUILT_TAG` 时，单 ABI 构建须提供对应的 `ERIKA_PREBUILT_SHA256`；Android 多 ABI 构建则须分别提供 `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64` 和 `ERIKA_PREBUILT_SHA256_X86`。完整发布方式见 [发布指南](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/releasing.zh.md)。
 Android 会为每个实际请求的 ABI 只下载一个约 20–22MB 的 runtime 归档，不会获取四 ABI 合并 C API 包或其中的静态库。
 
-源码构建时，macOS 使用 `ERIKA_MACOS_ARCHS=arm64|x86_64|universal`，Windows 使用 `ERIKA_WINDOWS_ARCH=x64|arm64`，Android 使用 `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86`。直接构建原生库时，`xtask --target`、`ERIKA_NATIVE_TARGET` 和 `cargo build --target` 必须使用同一个 target。详细示例见 [构建指南](https://github.com/AimesSoft/Erika/blob/main/docs/building.zh.md)。
+源码构建时，macOS 使用 `ERIKA_MACOS_ARCHS=arm64|x86_64|universal`，Windows 使用 `ERIKA_WINDOWS_ARCH=x64|arm64`，Android 使用 `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86`。直接构建原生库时，`xtask --target`、`ERIKA_NATIVE_TARGET` 和 `cargo build --target` 必须使用同一个 target。详细示例见 [构建指南](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/building.zh.md)。
 
 ## iOS Setup
 
@@ -197,11 +197,10 @@ HarmonyOS 使用 AVSession 发布媒体元数据、封面、播放状态、进�
 HarmonyOS 上请使用 `ErikaVideoView`。它注册 Flutter 外部纹理，把纹理 surface 取为
 `OHNativeWindow`，并通过 wgpu Vulkan 渲染。音频走 OHAudio，交错 f32 PCM。
 
-视频解码默认使用 HarmonyOS AVCodec 硬解，支持 H.264 和 HEVC。AVCodec 渲染到
-Surface，其 `OHNativeBuffer` 作为 Vulkan 外部图像导入，再由 Vulkan YCbCr sampler
-解析，因此帧无需 CPU 拷贝即可到达合成器。不具备所需 Vulkan 扩展的设备回退到
-FFmpeg 软解 + CPU 上传；回退会通过 `VideoDecoderChanged` 事件和 presenter 诊断
-上报，而不是让播放失败。
+此 AV1/AVIF 专用 fork 在 HarmonyOS 上默认使用 dav1d 软件解码。保留的 AVCodec
+集成只支持 H.264/HEVC，因此不会用于本 fork 支持的媒体。dav1d 帧通过现有 CPU
+upload 路径进入 Vulkan 合成器。AVCodec Surface 集成仅为 ABI/源码兼容而保留，
+不属于此 fork 的媒体支持范围。
 
 ## HTTP 请求头
 

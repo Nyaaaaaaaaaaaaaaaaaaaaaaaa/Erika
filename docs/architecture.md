@@ -14,7 +14,7 @@ Rust Player Core
   source abstraction ─── file + HTTP range
   FFmpeg wrappers ────── custom AVIO, probe, demux, decode, seek, audio resample
   playback engine ────── video/audio tick, clock, frame scheduler
-  video decode ───────── VideoToolbox, D3D11VA, MediaCodec, AVCodec, software fallback
+  AV1 decode ─────────── VideoToolbox, D3D11VA/DXVA2, MediaCodec, software fallback
   audio output ───────── CoreAudio, AudioQueue, WASAPI, AAudio, OHAudio, ring buffer
   overlay timeline ───── subtitle + danmaku composition
   renderer core ──────── color state, render graph, tone map, scaler policy
@@ -34,7 +34,7 @@ sources into `third_party/`. The default profile is `lgpl`.
 | Dependency | Version | Purpose |
 |------------|---------|---------|
 | FFmpeg | 8.1.2 | Demux, decode, audio resample, platform hardware decode |
-| dav1d | 1.5.1 | Android AV1 software fallback (8-bit and high bit depth) |
+| dav1d | 1.5.1 | AV1 software fallback on every target (8-bit and high bit depth) |
 | libass | 0.17.5 | ASS subtitle rendering |
 | FreeType | 2.14.3 | Font rasterization (libass dependency) |
 | HarfBuzz | 14.2.1 | Text shaping (libass dependency) |
@@ -56,10 +56,11 @@ cargo run -p xtask -- deps status
 - **Demuxer** — owns `AVFormatContext`, optionally with a Rust-backed custom
   `AVIOContext` from `MediaSource`. Supports stream selection, reference-counted
   packets, and timestamp-based seek.
-- **Decoder** — software plus VideoToolbox, D3D11VA, MediaCodec, and OpenHarmony
-  AVCodec hardware backends. Software AV1 on non-Windows targets selects the
-  source-built `libdav1d` decoder. Hardware frames preserve color metadata for
-  the renderer's platform-specific import or upload path.
+- **Decoder** — AV1 software plus VideoToolbox, D3D11VA/DXVA2, and MediaCodec
+  hardware backends. Software AV1 on every target selects source-built
+  `libdav1d`; OpenHarmony selects it directly because its retained AVCodec bridge
+  exposes only AVC/HEVC. Hardware frames preserve color metadata for the
+  renderer's platform-specific import or upload path.
 - **AudioResampler** — wraps `libswresample`, converts to interleaved f32 PCM
   (default 48 kHz stereo).
 - **SubtitleDecoder** — decodes embedded text and bitmap subtitle streams.
@@ -68,6 +69,12 @@ cargo run -p xtask -- deps status
 
 `PlaybackSession` opens media, selects tracks, configures decode backend, and
 produces video frames and PCM audio blocks.
+
+After probe and before decoder creation, the session requires an AV1 visual
+track. Dynamic AV1 is accepted in MP4/MOV, Matroska/WebM, IVF, and raw AV1;
+AVIF is accepted as one static primary image. Audio/subtitles/danmaku are
+ancillary only. Non-AV1 visuals and audio-only media fail through the existing
+error channel with the supported scope in the message.
 
 Decoder availability is a session invariant: when a video track is selected,
 the play, seek, and video-frame-pump entry points require an active video
@@ -209,9 +216,9 @@ Second renderer backend for portability:
   values as if they were SDR pixels.
 - Surface handle model covers macOS NSView, iOS UIView, Windows HWND,
   X11/Wayland, Android native windows, OpenHarmony `OHNativeWindow`.
-- OpenHarmony imports AVCodec Surface output as an `OHNativeBuffer`-backed
-  Vulkan external image and resolves YUV on the GPU with a Vulkan YCbCr
-  sampler, so decoded frames reach the wgpu compositor without a CPU copy.
+- The retained OpenHarmony AVCodec Surface import remains ABI-compatible but is
+  not selected for supported media because that bridge has no AV1 path.
+  Source-built dav1d output reaches the wgpu compositor through CPU upload.
   Devices without the required Vulkan extensions fall back to software decode
   and CPU upload, and the fallback is reported through the diagnostics events.
 - Android has bounded Vulkan/GLES backend recovery and explicit import,
@@ -324,10 +331,10 @@ See `docs/flutter_embedding.md` for the embedding model and HDR strategy.
 
 | Platform | Decode | Render | Audio | Status |
 |----------|--------|--------|-------|--------|
-| macOS 11+ | VideoToolbox | Metal | CoreAudio | Available |
-| iOS 13+ | VideoToolbox | Metal | AudioQueue | Available |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | Available |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | Available |
+| macOS 11+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | Available |
+| iOS 13+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | Available |
 | Linux | — | wgpu (planned) | — | Planned |
-| Android 8+ | MediaCodec / software | wgpu Vulkan with GLES fallback | AAudio | Available; SDR validated, extended-linear scRGB implementation awaits API 35 HDR-device acceptance |
-| HarmonyOS API 18+ | AVCodec (H.264/HEVC) / software | wgpu Vulkan, `OHNativeBuffer` zero-copy import | OHAudio | Available; validated on device, CI builds the OpenHarmony C ABI but has no device-side run verification |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu Vulkan with GLES fallback | AAudio | Available; this fork still requires device acceptance |
+| HarmonyOS API 18+ | AV1 dav1d software | wgpu Vulkan | OHAudio | Available; this fork still requires device acceptance |

@@ -71,22 +71,28 @@ fn main() {
             }
         }
     }
-    if matches!(
-        env::var("CARGO_CFG_TARGET_OS").as_deref(),
-        Ok("android" | "macos" | "ios" | "tvos")
-    ) {
+    if target_uses_dav1d() {
         let dav1d_header = dav1d_dir.join("include/dav1d/dav1d.h");
-        let dav1d_archive = dav1d_dir.join("lib/libdav1d.a");
-        for path in [&dav1d_header, &dav1d_archive] {
-            println!("cargo:rerun-if-changed={}", path.display());
-            if !path.is_file() {
-                panic!(
-                    "dav1d dependency was not found at {}. Run `{}` first, or set ERIKA_DAV1D_DIR.",
-                    path.display(),
-                    xtask_build_hint()
-                );
-            }
+        println!("cargo:rerun-if-changed={}", dav1d_header.display());
+        if !dav1d_header.is_file() {
+            panic!(
+                "dav1d dependency was not found at {}. Run `{}` first, or set ERIKA_DAV1D_DIR.",
+                dav1d_header.display(),
+                xtask_build_hint()
+            );
         }
+        let dav1d_archive = ["libdav1d.a", "dav1d.lib", "libdav1d.lib"]
+            .into_iter()
+            .map(|name| dav1d_dir.join("lib").join(name))
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "dav1d static library was not found under {}. Run `{}` first, or set ERIKA_DAV1D_DIR.",
+                    dav1d_dir.join("lib").display(),
+                    xtask_build_hint()
+                )
+            });
+        println!("cargo:rerun-if-changed={}", dav1d_archive.display());
     }
 
     let ffmpeg_version_major = emit_ffmpeg_version_cfg(&include_dir);
@@ -97,10 +103,7 @@ fn main() {
         "cargo:rustc-link-search=native={}",
         zlib_dir.join("lib").display()
     );
-    if matches!(
-        env::var("CARGO_CFG_TARGET_OS").as_deref(),
-        Ok("android" | "macos" | "ios" | "tvos")
-    ) {
+    if target_uses_dav1d() {
         println!(
             "cargo:rustc-link-search=native={}",
             dav1d_dir.join("lib").display()
@@ -113,10 +116,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=swresample");
     println!("cargo:rustc-link-lib=static=swscale");
     println!("cargo:rustc-link-lib=static=avutil");
-    if matches!(
-        env::var("CARGO_CFG_TARGET_OS").as_deref(),
-        Ok("android" | "macos" | "ios" | "tvos")
-    ) {
+    if target_uses_dav1d() {
         println!("cargo:rustc-link-lib=static=dav1d");
     }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
@@ -201,6 +201,10 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("write FFmpeg bindings");
+}
+
+fn target_uses_dav1d() -> bool {
+    true
 }
 
 fn emit_ffmpeg_version_cfg(include_dir: &Path) -> Option<u32> {

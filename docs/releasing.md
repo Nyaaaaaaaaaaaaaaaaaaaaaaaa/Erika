@@ -2,6 +2,12 @@
 
 > Translations: [中文](releasing.zh.md) · [日本語](releasing.ja.md)
 
+> Fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` has not published any native,
+> pub.dev, OHPM, or Swift artifact. Its ecosystem publishing workflows are
+> guarded to run only in `AimesSoft/Erika`; this fork may use the native GitHub
+> Release workflow for a future organization-owned release, but must never write
+> to upstream package channels or `AimesSoft/ErikaSwift`.
+
 This describes how prebuilt `erika_capi` binaries are published so that other
 projects can link Erika without building it from source.
 
@@ -177,6 +183,7 @@ The following environment variables customize that behavior:
 | `ERIKA_PREBUILT_SHA256=...` | Expected digest when overriding the release tag. |
 | `ERIKA_PREBUILT_SHA256_<ABI>=...` | Per-ABI digest for custom multi-ABI Android builds; suffixes are `ARM64_V8A`, `ARMEABI_V7A`, `X86_64`, and `X86`. |
 | `ERIKA_FORCE_SOURCE_BUILD=1` | Bypass the prebuilt path and build the local source, useful when debugging Erika changes through the Flutter plugin. |
+| `ERIKA_PREBUILT_REPOSITORY=owner/repo` | Override the GitHub repository used for prebuilt downloads. The default is `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika`; missing fork assets fail explicitly and never fall back to upstream binaries. |
 | `ERIKA_MACOS_ARCHS=universal|arm64|x86_64|arm64,x86_64` | Select the macOS source and prebuilt artifact architecture. |
 
 - **Windows** (`build_erika_runtime.cmake`): downloads the x64 or ARM64 archive

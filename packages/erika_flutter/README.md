@@ -61,11 +61,12 @@ points the build phase at an explicit dylib to bundle instead of building.
 
 ## Native binaries
 
-The plugin downloads the matching `v0.1.7` native runtime by default on macOS,
-Windows, iOS, tvOS, Android, and OpenHarmony. Every archive is pinned by SHA-256;
-a missing or invalid archive fails with an explicit error instead of silently
-requiring a Rust, FFmpeg, or NDK toolchain. See the
-[release guide](https://github.com/AimesSoft/Erika/blob/main/docs/releasing.md).
+The plugin downloads the matching `v0.1.7` native runtime from
+`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` by default on macOS, Windows, iOS, tvOS,
+Android, and OpenHarmony. `ERIKA_PREBUILT_REPOSITORY=owner/repo` overrides that
+source. Every archive is pinned by SHA-256; a missing or invalid fork archive
+fails explicitly and never falls back to an upstream full-codec binary. See the
+[release guide](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/releasing.md).
 Android downloads one approximately 20–22 MB runtime archive per requested ABI;
 it does not fetch the four-ABI C API bundle or its static libraries.
 
@@ -81,7 +82,7 @@ Windows with `ERIKA_WINDOWS_ARCH=x64|arm64`, and Android with
 `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86`. For direct native builds,
 `xtask --target`, `ERIKA_NATIVE_TARGET`, and `cargo build --target` must name the
 same target. See the
-[build guide](https://github.com/AimesSoft/Erika/blob/main/docs/building.md).
+[build guide](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/building.md).
 
 ## iOS Setup
 
@@ -272,13 +273,11 @@ Use `ErikaVideoView` on HarmonyOS. It registers a Flutter external texture,
 obtains the texture surface as an `OHNativeWindow`, and renders through wgpu
 Vulkan. Audio uses OHAudio with interleaved f32 PCM.
 
-Video decoding defaults to HarmonyOS AVCodec hardware decoding for H.264 and
-HEVC. AVCodec renders into a Surface whose `OHNativeBuffer` is imported as a
-Vulkan external image and resolved with a Vulkan YCbCr sampler, so frames reach
-the compositor without a CPU copy. Devices that do not expose the required
-Vulkan extensions fall back to FFmpeg software decoding and CPU upload; the
-fallback is reported through `VideoDecoderChanged` events and the presenter
-diagnostics rather than failing playback.
+This AV1/AVIF-specialized fork defaults to dav1d software decoding on HarmonyOS.
+The retained AVCodec integration only supports H.264/HEVC and is therefore not
+selected for supported media. dav1d frames use the existing CPU-upload path to
+the Vulkan compositor. The dormant AVCodec surface integration remains in the
+package for ABI/source compatibility but is outside this fork's media contract.
 
 ## HTTP Headers
 

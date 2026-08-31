@@ -97,17 +97,11 @@ external texture, takes that texture's surface as an `OHNativeWindow`, and
 attaches it to the presenter; wgpu then renders through Vulkan, using
 `VK_OHOS_surface` for window-system integration.
 
-Video decoding defaults to HarmonyOS AVCodec (H.264 and HEVC). AVCodec decodes
-straight into a Surface, whose `OHNativeBuffer` is imported as a Vulkan
-external image and resolved by a Vulkan YCbCr sampler, so decoded frames reach
-the compositor with no CPU copy. Subtitles, danmaku, and overlays composite in
-the same wgpu pass as every other platform.
-
-Devices missing the required Vulkan extensions fall back to FFmpeg software
-decode with CPU upload. The fallback is reported through `VideoDecoderChanged`
-events and presenter diagnostics instead of failing playback. The HarmonyOS
-path is validated on device; CI builds the OpenHarmony C ABI but has no
-device-side run verification.
+This AV1/AVIF-only fork selects source-built dav1d directly on HarmonyOS because
+the retained AVCodec bridge exposes only H.264/HEVC. dav1d frames use CPU upload
+into the same wgpu pass as subtitles, danmaku, and overlays. The AVCodec Surface
+path remains only for ABI/source compatibility and is outside the supported
+media contract. Device-side acceptance for this fork remains pending.
 
 ## Transparent Video and Blend Modes
 

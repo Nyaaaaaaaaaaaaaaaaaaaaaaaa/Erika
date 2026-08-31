@@ -13,10 +13,22 @@
 
 The host application provides a rendering surface and sends playback commands — decoding, timing, video rendering, subtitles, danmaku, and audio output are handled entirely inside Erika, without passing through the host's rendering pipeline.
 
+## Media scope of this fork
+
+`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` keeps Erika's existing crates, C ABI,
+Flutter/ArkTS package names, and cross-platform rendering interfaces, while
+accepting only these visual formats:
+
+- Dynamic AV1 video in MP4/MOV, Matroska/MKV, WebM, IVF, or raw AV1/OBU.
+- A single static primary image in AVIF. Animated AVIF and image sequences are
+  not compatibility commitments; the decoded image remains on the render surface at EOF.
+- Audio, embedded/external subtitles, and danmaku are ancillary to AV1
+  playback. Audio-only media and every other visual codec are rejected.
+
 ## Features
 
-- **Hardware-accelerated decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA (Windows), MediaCodec (Android), and AVCodec (HarmonyOS), with explicit software-decode fallback when interop is unavailable
-- **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), MediaCodec Surface to AHardwareBuffer/Vulkan (Android), and AVCodec Surface to OHNativeBuffer/Vulkan (HarmonyOS), with explicit CPU-upload fallback when import fails
+- **AV1 hardware decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA/DXVA2 (Windows), and MediaCodec (Android), with explicit AV1 software fallback; HarmonyOS selects dav1d directly
+- **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), and MediaCodec Surface to AHardwareBuffer/Vulkan (Android), with explicit CPU upload for software frames
 - **HDR/EDR output** -- Apple EDR, Windows HDR10, and Android FP16 extended-linear scRGB negotiation with explicit SDR fallback
 - **Native Metal renderer** -- YCbCr sampling, color space conversion, tone mapping, subtitle/danmaku compositing in a single render pass (macOS/iOS/tvOS)
 - **Native Direct3D 11 renderer** -- Windows: D3D11VA zero-copy texture interop, YCbCr sampling, HDR10 output, subtitle/danmaku overlay compositing
@@ -72,27 +84,17 @@ ErikaVideoView(player: player)
 
 ### Flutter package
 
-`erika_flutter` 0.1.7 is available on [pub.dev](https://pub.dev/packages/erika_flutter)
-for macOS, iOS, tvOS, Windows, Android, and HarmonyOS/OpenHarmony. Add it to a
-Flutter app with:
-
-```sh
-flutter pub add erika_flutter
-```
-
-The package downloads the matching verified native runtime during the platform
-build. Android downloads only the selected ABI archive; Linux and Web are not
-published targets yet.
+This fork has not published a pub.dev package or prebuilt runtime. Consume the
+package from this source checkout with `ERIKA_FORCE_SOURCE_BUILD=1`. Prebuilt
+scripts default to `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` and may be overridden by
+`ERIKA_PREBUILT_REPOSITORY`; until this organization publishes matching assets,
+prebuilt mode fails explicitly and never downloads upstream full-codec binaries.
 
 ### OpenHarmony package
 
-The native ArkTS package `erika` 0.1.7 is published on
-[OHPM](https://ohpm.openharmony.cn/#/cn/detail/erika) for OpenHarmony arm64
-applications (API 18+). Install it with:
-
-```sh
-ohpm install erika
-```
+This fork has not published an OHPM package. Integrate the source under
+`packages/erika_ohos`; the upstream package with the same name does not carry
+this fork's AV1/AVIF-only contract.
 
 See the [OpenHarmony package guide](../packages/erika_ohos/README.md) for the
 `ErikaPlayer` API and `XComponent` surface setup.
@@ -112,13 +114,13 @@ Header: [`crates/erika_capi/include/erika.h`](../crates/erika_capi/include/erika
 
 | Platform | Decode | Render | Audio | Status |
 |----------|--------|--------|-------|--------|
-| macOS 14+ | VideoToolbox | Metal | CoreAudio | **Available** |
-| iOS 16+ | VideoToolbox | Metal | AudioQueue | **Available** |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | **Available** |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | **Available** |
+| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **Available** |
+| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **Available** |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **Available** |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **Available** |
 | Linux | -- | wgpu (planned) | -- | Planned |
-| Android 8+ | MediaCodec / software | wgpu (Vulkan + GLES fallback) | AAudio | **Available**; SDR verified, extended-linear scRGB implemented, API 35 HDR-device active-path acceptance pending |
-| HarmonyOS API 18+ | AVCodec (H.264/HEVC) / software | wgpu (Vulkan) + `OHNativeBuffer` zero-copy import | OHAudio | **Available**; validated on device, not yet covered by CI |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **Available**; device acceptance for this fork remains pending |
+| HarmonyOS API 18+ | AV1 dav1d software decode | wgpu (Vulkan) | OHAudio | **Available**; device acceptance for this fork remains pending |
 
 ## Repository Structure
 

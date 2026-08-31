@@ -132,6 +132,13 @@ def skipNativeBuild = (project.findProperty("erikaSkipNativeBuild")
 def forceSourceBuild = (System.getenv("ERIKA_FORCE_SOURCE_BUILD") ?: "0") == "1"
 def usePrebuilt = !forceSourceBuild
 def prebuiltTag = System.getenv("ERIKA_PREBUILT_TAG") ?: defaultPrebuiltTag
+def prebuiltRepository =
+    System.getenv("ERIKA_PREBUILT_REPOSITORY") ?: "Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika"
+if (!(prebuiltRepository ==~ /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/)) {
+    throw new GradleException(
+        "ERIKA_PREBUILT_REPOSITORY must be a GitHub owner/repository pair",
+    )
+}
 def configuredPrebuiltSha256 = System.getenv("ERIKA_PREBUILT_SHA256")
 def prebuiltCacheKey = prebuiltTag.replaceAll(/[^A-Za-z0-9._-]/, "_")
 def prebuiltCacheDirectory = new File(
@@ -297,7 +304,7 @@ tasks.register("buildErikaAndroidRuntime") {
                         "${prebuiltName}.zip",
                     )
                     def prebuiltUrl =
-                        "https://github.com/AimesSoft/Erika/releases/download/" +
+                        "https://github.com/$prebuiltRepository/releases/download/" +
                         "$prebuiltTag/${prebuiltName}.zip"
                     if (prebuiltArchive.isFile()) {
                         def cachedSha256 = sha256(prebuiltArchive)

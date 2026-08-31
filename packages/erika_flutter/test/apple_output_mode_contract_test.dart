@@ -2,12 +2,13 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _readNormalized(String path) =>
+    File(path).readAsStringSync().replaceAll('\r\n', '\n');
+
 void main() {
   test('automatic output mode keeps the native ABI value 3', () {
-    final header = File(
-      'native/include/erika.h',
-    ).readAsStringSync();
-    final dart = File('lib/src/erika_player.dart').readAsStringSync();
+    final header = _readNormalized('native/include/erika.h');
+    final dart = _readNormalized('lib/src/erika_player.dart');
 
     expect(header, contains('ErikaPresenterOutputMode_Auto = 3'));
     expect(dart, contains('auto(3)'));
@@ -16,9 +17,8 @@ void main() {
 
   for (final platform in <String>['macos', 'ios', 'tvos']) {
     test('$platform defaults Apple output to source-aware auto mode', () {
-      final plugin = File(
-        '$platform/Classes/ErikaFlutterPlugin.swift',
-      ).readAsStringSync();
+      final plugin =
+          _readNormalized('$platform/Classes/ErikaFlutterPlugin.swift');
 
       expect(
         plugin,
@@ -36,17 +36,15 @@ void main() {
 
   for (final platform in <String>['ios', 'tvos']) {
     test('$platform does not reset active auto output during resize', () {
-      final plugin = File(
-        '$platform/Classes/ErikaFlutterPlugin.swift',
-      ).readAsStringSync();
+      final plugin =
+          _readNormalized('$platform/Classes/ErikaFlutterPlugin.swift');
 
       expect(plugin, contains('if attach || presenterConfig.outputMode != 3'));
     });
 
     test('$platform presenter stats returns its Flutter map', () {
-      final plugin = File(
-        '$platform/Classes/ErikaFlutterPlugin.swift',
-      ).readAsStringSync();
+      final plugin =
+          _readNormalized('$platform/Classes/ErikaFlutterPlugin.swift');
 
       expect(
         plugin,
@@ -65,7 +63,7 @@ void main() {
     if (!rendererFile.existsSync()) {
       return;
     }
-    final renderer = rendererFile.readAsStringSync();
+    final renderer = _readNormalized(rendererFile.path);
 
     expect(renderer, contains('layer.setPixelFormat('));
     expect(

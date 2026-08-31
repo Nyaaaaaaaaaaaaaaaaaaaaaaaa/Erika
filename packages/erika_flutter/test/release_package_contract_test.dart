@@ -58,6 +58,28 @@ void main() {
     expect(files, isNot(contains('falling back to a source build')));
   });
 
+  test('prebuilt downloads stay inside the fork unless explicitly overridden', () {
+    for (final path in <String>[
+      'android/erika-native.gradle',
+      'native/prepare_apple_prebuilt.sh',
+      'windows/build_erika_runtime.cmake',
+      'ohos/src/main/cpp/CMakeLists.txt',
+    ]) {
+      final loader = File(path).readAsStringSync();
+      expect(loader, contains('ERIKA_PREBUILT_REPOSITORY'), reason: path);
+      expect(
+        loader,
+        contains('Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika'),
+        reason: path,
+      );
+      expect(
+        loader,
+        isNot(contains('github.com/AimesSoft/Erika/releases')),
+        reason: path,
+      );
+    }
+  });
+
   test('Android downloads verified per-ABI Flutter runtimes', () {
     final android = File('android/erika-native.gradle').readAsStringSync();
     final artifacts = File('native_artifacts.properties').readAsStringSync();

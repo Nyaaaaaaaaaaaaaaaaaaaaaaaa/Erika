@@ -35,6 +35,20 @@ case "$PLATFORM:$ARCH" in
 esac
 
 PREBUILT_TAG="${ERIKA_PREBUILT_TAG:-$DEFAULT_TAG}"
+PREBUILT_REPOSITORY="${ERIKA_PREBUILT_REPOSITORY:-Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika}"
+case "$PREBUILT_REPOSITORY" in
+  */*) ;;
+  *)
+    echo "error: ERIKA_PREBUILT_REPOSITORY must be a GitHub owner/repository pair" >&2
+    exit 1
+    ;;
+esac
+case "$PREBUILT_REPOSITORY" in
+  *[!A-Za-z0-9_.\/-]* | */*/* | /* | */)
+    echo "error: ERIKA_PREBUILT_REPOSITORY must be a GitHub owner/repository pair" >&2
+    exit 1
+    ;;
+esac
 if [ -n "${ERIKA_PREBUILT_SHA256:-}" ]; then
   PREBUILT_SHA256="$ERIKA_PREBUILT_SHA256"
 elif [ "$PREBUILT_TAG" = "$DEFAULT_TAG" ]; then
@@ -49,7 +63,7 @@ CACHE_KEY="$(printf '%s' "$PREBUILT_TAG" | tr -c 'A-Za-z0-9._-' '_')"
 WORK="$CACHE_BASE/$CACHE_KEY/$ASSET"
 ZIP="$WORK/$ASSET.zip"
 UNPACKED="$WORK/unpacked"
-URL="https://github.com/AimesSoft/Erika/releases/download/$PREBUILT_TAG/$ASSET.zip"
+URL="https://github.com/$PREBUILT_REPOSITORY/releases/download/$PREBUILT_TAG/$ASSET.zip"
 mkdir -p "$WORK"
 
 verify_sha256() {

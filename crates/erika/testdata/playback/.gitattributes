@@ -1,2 +1,8 @@
 * text eol=lf
 *.mkv binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.ivf binary
+*.obu binary
+*.avif binary

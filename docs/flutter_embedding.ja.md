@@ -66,16 +66,11 @@ texture を登録し、その texture の surface を `OHNativeWindow` として
 presenter に attach します。wgpu はその上で Vulkan 描画を行い、window system
 integration には `VK_OHOS_surface` を使います。
 
-video decode の既定は HarmonyOS AVCodec（H.264 / HEVC）です。AVCodec は Surface に
-直接 decode し、その `OHNativeBuffer` を Vulkan external image として import して
-Vulkan YCbCr sampler で解決するため、decode したフレームは CPU コピーなしで
-compositor に届きます。字幕・danmaku・overlay は他 platform と同じ wgpu pass で
-合成されます。
-
-必要な Vulkan extension が無い端末は FFmpeg software decode と CPU upload に
-fallback します。fallback は再生を失敗させず、`VideoDecoderChanged` event と
-presenter diagnostics から報告されます。HarmonyOS path は実機で検証済みですが、
-CI は OpenHarmony C ABI をビルドしますが、デバイス側の実行検証はありません。
+この AV1/AVIF 専用 fork は、保持された AVCodec bridge が H.264/HEVC のみ対応するため、
+HarmonyOS で source-built dav1d を直接選択します。dav1d frame は CPU upload で
+subtitle、danmaku、overlay と同じ wgpu pass に入ります。AVCodec Surface path は
+ABI/source compatibility のためだけに保持され、supported media の対象外です。
+この fork の HarmonyOS 実機 acceptance は未実施です。
 
 ## 透明 video と blend mode
 

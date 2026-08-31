@@ -5296,12 +5296,22 @@ mod tests {
             status.requested_mode,
             ErikaLumaUpscalerMode::ArtCnnC4F16 as i32
         );
-        let expected_backend = if cfg!(all(target_os = "android", feature = "wgpu")) {
-            ErikaUpscalerBackendStatus::Scalar
+        if cfg!(target_os = "windows") {
+            // D3D11 starts ART-CNN resource creation asynchronously, so this
+            // immediate status read may observe either side of that transition.
+            assert!(matches!(
+                status.active_backend,
+                value if value == ErikaUpscalerBackendStatus::Building as i32
+                    || value == ErikaUpscalerBackendStatus::Scalar as i32
+            ));
         } else {
-            ErikaUpscalerBackendStatus::Inactive
-        };
-        assert_eq!(status.active_backend, expected_backend as i32);
+            let expected_backend = if cfg!(all(target_os = "android", feature = "wgpu")) {
+                ErikaUpscalerBackendStatus::Scalar
+            } else {
+                ErikaUpscalerBackendStatus::Inactive
+            };
+            assert_eq!(status.active_backend, expected_backend as i32);
+        }
         assert_eq!(status.fallback_count, 0);
         assert_eq!(status.upscaled_frames, 0);
         unsafe { erika_presenter_destroy(handle) };

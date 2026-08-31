@@ -39,7 +39,7 @@ system that produced these binaries are publicly available:
 
 - **Erika source** (this exact build): the Git tag named in the release / the
   commit recorded in the bundle's `MANIFEST.txt`, at
-  <https://github.com/AimesSoft/Erika>.
+  <https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika>.
 - **Native dependency build**: `xtask deps build --all --profile lgpl` plus the
   per-target build described in `docs/building.md` in that source tree.
 

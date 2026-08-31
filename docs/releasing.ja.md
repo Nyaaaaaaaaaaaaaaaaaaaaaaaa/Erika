@@ -2,6 +2,16 @@
 
 > 翻訳：[English](releasing.md) · [中文](releasing.zh.md)
 
+> fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` は native、pub.dev、OHPM、Swift
+> artifact をまだ公開していません。ecosystem publish workflow は `AimesSoft/Erika`
+> のみで実行される guard を持ち、この fork は upstream package channel または
+> `AimesSoft/ErikaSwift` に書き込みません。将来の organization-owned native GitHub
+> Release workflow は保持します。
+
+prebuilt download の既定 repository は `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` です。
+`ERIKA_PREBUILT_REPOSITORY=owner/repo` で上書きでき、fork asset が無い場合は明示的に
+失敗して upstream full-codec binary へ fallback しません。
+
 この文書は、依存 project が FFmpeg と Erika を source から build せずに利用できる prebuilt `erika_capi` の公開方法を説明します。
 
 ## Release artifact

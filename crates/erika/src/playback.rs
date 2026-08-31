@@ -29,8 +29,16 @@ pub enum PlaybackError {
     Ffmpeg(#[from] ffmpeg::FfmpegError),
     #[error("source error: {0}")]
     Source(#[from] source::SourceError),
-    #[error("no video track found")]
+    #[error("no supported visual track found; only AV1 video and static AVIF images are supported")]
     NoVideoTrack,
+    #[error(
+        "unsupported visual codec {codec}; only AV1 video and static AVIF images are supported"
+    )]
+    UnsupportedVisualCodec { codec: String },
+    #[error(
+        "unable to inspect this media ({reason}); only AV1 video and static AVIF images are supported"
+    )]
+    UnsupportedMediaInput { reason: String },
     #[error("video decoder unavailable: {reason}")]
     VideoDecoderUnavailable { reason: String },
     #[error("selected decoder output is not a video frame")]
@@ -593,7 +601,10 @@ impl Default for VideoDecodePreference {
 #[cfg(target_env = "ohos")]
 impl Default for VideoDecodePreference {
     fn default() -> Self {
-        Self::AvCodec
+        // Erika's OpenHarmony AVCodec bridge currently exposes AVC/HEVC only.
+        // This AV1/AVIF-specialized fork therefore selects libdav1d directly
+        // instead of attempting an unsupported hardware open before fallback.
+        Self::Software
     }
 }
 
@@ -847,20 +858,18 @@ impl PlaybackSession {
             request.http_headers.clone(),
             request.http_read_ahead_bytes,
         )?;
-        let mut demuxer = Demuxer::open_source(source)?;
+        let mut demuxer =
+            Demuxer::open_source(source).map_err(|error| PlaybackError::UnsupportedMediaInput {
+                reason: error.to_string(),
+            })?;
         let mut probe = demuxer.probe().clone();
         let subtitle_fonts = probe.subtitle_fonts.clone();
+        let selected_video_track = Some(supported_visual_track(&probe.tracks)?);
         let codec_parameters = probe
             .tracks
             .iter()
             .map(|track| demuxer.owned_codec_parameters(track.id as i32))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let selected_video_track = demuxer
-            .probe()
-            .tracks
-            .iter()
-            .find(|track| track.kind == TrackKind::Video)
-            .map(|track| track.id as i32);
         let audio_track_candidates = demuxer
             .probe()
             .tracks
@@ -5857,6 +5866,20 @@ fn sanitize_playback_rate(rate: f64) -> f64 {
     }
 }
 
+fn supported_visual_track(tracks: &[TrackInfo]) -> Result<i32> {
+    let mut selected = None;
+    for track in tracks.iter().filter(|track| track.kind == TrackKind::Video) {
+        let codec = track.codec.as_deref().unwrap_or("unknown");
+        if !codec.eq_ignore_ascii_case("av1") {
+            return Err(PlaybackError::UnsupportedVisualCodec {
+                codec: codec.to_string(),
+            });
+        }
+        selected.get_or_insert(track.id as i32);
+    }
+    selected.ok_or(PlaybackError::NoVideoTrack)
+}
+
 fn should_fallback_video_decoder_open_error(backend: DecoderBackend, codec: Option<&str>) -> bool {
     matches!(
         backend,
@@ -5955,6 +5978,59 @@ mod tests {
 
     const FIXTURE_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 
+    fn track(id: i64, kind: TrackKind, codec: Option<&str>) -> TrackInfo {
+        let mut track = TrackInfo::embedded(id, kind);
+        track.codec = codec.map(str::to_string);
+        track
+    }
+
+    #[test]
+    fn visual_policy_accepts_only_av1_tracks() {
+        let tracks = [
+            track(0, TrackKind::Video, Some("av1")),
+            track(1, TrackKind::Audio, Some("flac")),
+            track(2, TrackKind::Subtitle, Some("subrip")),
+        ];
+        assert_eq!(supported_visual_track(&tracks).unwrap(), 0);
+    }
+
+    #[test]
+    fn visual_policy_rejects_non_av1_and_unknown_video_tracks() {
+        for codec in [
+            Some("h264"),
+            Some("hevc"),
+            Some("vp9"),
+            Some("mjpeg"),
+            Some("png"),
+            Some("webp"),
+            None,
+        ] {
+            let error = supported_visual_track(&[track(0, TrackKind::Video, codec)])
+                .expect_err("non-AV1 visual tracks must be rejected");
+            assert!(matches!(
+                error,
+                PlaybackError::UnsupportedVisualCodec { .. }
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("only AV1 video and static AVIF images")
+            );
+        }
+    }
+
+    #[test]
+    fn visual_policy_rejects_audio_only_media() {
+        let error = supported_visual_track(&[track(0, TrackKind::Audio, Some("flac"))])
+            .expect_err("audio-only media must be rejected");
+        assert!(matches!(error, PlaybackError::NoVideoTrack));
+        assert!(
+            error
+                .to_string()
+                .contains("only AV1 video and static AVIF images")
+        );
+    }
+
     fn playback_fixture_path() -> PathBuf {
         std::env::var_os("ERIKA_PLAYBACK_FIXTURE")
             .map(PathBuf::from)
@@ -5983,6 +6059,141 @@ mod tests {
         assert_eq!(engine.info().selected_video_track, Some(0));
         assert_eq!(engine.info().selected_audio_track, Some(1));
         engine
+    }
+
+    fn open_visual_fixture(name: &str) -> VideoPlaybackEngine {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/playback")
+            .join(name);
+        assert!(path.is_file(), "fixture is missing: {}", path.display());
+        let config = PlaybackSessionConfig {
+            video_decode: VideoDecodePreference::Software,
+            ..PlaybackSessionConfig::default()
+        };
+        VideoPlaybackEngine::open(
+            &MediaRequest {
+                uri: path.to_string_lossy().into_owned(),
+                source_hint: MediaSourceHint::LocalFile,
+                http_headers: Vec::new(),
+                http_read_ahead_bytes: None,
+            },
+            config,
+        )
+        .unwrap_or_else(|error| panic!("failed to open {}: {error}", path.display()))
+    }
+
+    #[test]
+    fn supported_av1_container_fixtures_decode_a_frame() {
+        for name in [
+            "playback-fixture.mkv",
+            "av1-video.mp4",
+            "av1-video.mov",
+            "av1-video.webm",
+            "av1-video.ivf",
+            "av1-video.obu",
+        ] {
+            let mut engine = open_visual_fixture(name);
+            let started_at = Instant::now();
+            engine.play_at(started_at);
+            let frame = next_fixture_video_at(&mut engine, started_at);
+            assert_eq!((frame.frame.width(), frame.frame.height()), (160, 90));
+        }
+    }
+
+    #[test]
+    fn static_avif_decodes_exactly_one_frame_and_retains_presented_position_at_eof() {
+        let mut engine = open_visual_fixture("static.avif");
+        let started_at = Instant::now();
+        engine.play_at(started_at);
+        let frame = next_fixture_video_at(&mut engine, started_at);
+        assert_eq!((frame.frame.width(), frame.frame.height()), (160, 90));
+
+        let deadline = Instant::now() + FIXTURE_WAIT_TIMEOUT;
+        while engine.state() != PlaybackRunState::Ended {
+            assert!(
+                engine
+                    .tick_at(started_at + Duration::from_secs(1))
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(Instant::now() < deadline, "static AVIF did not reach EOF");
+            thread::yield_now();
+        }
+        assert_eq!(engine.last_presented_pts, frame.pts);
+    }
+
+    #[test]
+    fn uninspectable_media_error_still_states_the_supported_visual_scope() {
+        let path = std::env::temp_dir().join(format!(
+            "erika-unsupported-media-{}.bin",
+            std::process::id()
+        ));
+        fs::write(&path, b"not a supported media file").unwrap();
+        let result = VideoPlaybackEngine::open(
+            &MediaRequest {
+                uri: path.to_string_lossy().into_owned(),
+                source_hint: MediaSourceHint::LocalFile,
+                http_headers: Vec::new(),
+                http_read_ahead_bytes: None,
+            },
+            PlaybackSessionConfig::default(),
+        );
+        let _ = fs::remove_file(path);
+        let error = match result {
+            Ok(_) => panic!("uninspectable media must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, PlaybackError::UnsupportedMediaInput { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("only AV1 video and static AVIF images")
+        );
+    }
+
+    #[test]
+    fn unsupported_media_samples_are_rejected_when_env_is_set() {
+        let Some(directory) =
+            std::env::var_os("ERIKA_UNSUPPORTED_MEDIA_SAMPLES_DIR").map(PathBuf::from)
+        else {
+            return;
+        };
+        let mut paths = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", directory.display()))
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        paths.sort();
+        assert!(!paths.is_empty(), "no samples in {}", directory.display());
+
+        for path in paths {
+            let result = VideoPlaybackEngine::open(
+                &MediaRequest {
+                    uri: path.to_string_lossy().into_owned(),
+                    source_hint: MediaSourceHint::LocalFile,
+                    http_headers: Vec::new(),
+                    http_read_ahead_bytes: None,
+                },
+                PlaybackSessionConfig::default(),
+            );
+            let error = match result {
+                Ok(_) => panic!("unsupported media must fail: {}", path.display()),
+                Err(error) => error,
+            };
+            assert!(matches!(
+                error,
+                PlaybackError::NoVideoTrack
+                    | PlaybackError::UnsupportedVisualCodec { .. }
+                    | PlaybackError::UnsupportedMediaInput { .. }
+            ));
+            assert!(
+                error
+                    .to_string()
+                    .contains("only AV1 video and static AVIF images"),
+                "unexpected error for {}: {error}",
+                path.display()
+            );
+        }
     }
 
     #[test]

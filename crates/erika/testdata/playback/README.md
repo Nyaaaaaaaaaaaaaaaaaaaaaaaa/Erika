@@ -1,6 +1,6 @@
 # Deterministic playback fixture
 
-`playback-fixture.mkv` is a small, deterministic input for Erika playback
+`playback-fixture.mkv` is a small, deterministic AV1 input for Erika playback
 state and track-switching tests. It is eight seconds long and contains, in
 this exact order:
 
@@ -13,7 +13,7 @@ MPL-2.0 license.
 
 | Index | Type | Contents |
 | ---: | --- | --- |
-| 0 | Video | MPEG-4 Part 2, 160x90, 30 fps, GOP 30, no B-frames |
+| 0 | Video | AV1, 160x90, 30 fps, GOP 30 |
 | 1 | Audio | FLAC, mono 48 kHz, 880 Hz tone for the first 100 ms of each second |
 | 2 | Audio | FLAC, mono 48 kHz, 1320 Hz tone for the first 100 ms of each second |
 | 3 | Subtitle | SubRip `track-a.srt`, one labelled cue per second |
@@ -23,13 +23,19 @@ The video has 240 frames. Its only keyframes are at 0, 1, 2, 3, 4, 5, 6,
 and 7 seconds. These regular landmarks make seek, replay, rate, and track
 selection assertions independent of network or decoder timing.
 
+The same deterministic AV1 track is also committed as `av1-video.mp4`,
+`av1-video.mov`, `av1-video.webm`, `av1-video.ivf`, and `av1-video.obu` so the
+complete supported dynamic-container surface is exercised without network
+inputs. `static.avif` is a single-frame AVIF fixture; animated AVIF is not part
+of Erika's compatibility contract.
+
 ## Verify
 
 Generation is deliberately pinned to FFmpeg and FFprobe 8.1.2. The script
-uses bitexact flags and single-threaded native MPEG-4/FLAC encoders. It builds
-the file twice, compares the results byte-for-byte, checks the stream layout,
-duration, frame count, B-frame count, and keyframe timestamps, then compares
-the result and checksums with the committed files.
+uses bitexact flags and single-threaded libaom AV1/FLAC encoders. It builds the
+complete fixture set twice, compares every result byte-for-byte, checks codec,
+stream layout, duration, frame count, and keyframe timestamps, then compares
+the results and checksums with the committed files.
 
 ```sh
 cd crates/erika/testdata/playback

@@ -8,6 +8,7 @@ on:
 jobs:
   verify:
     name: Verify package and native release
+    if: github.repository == 'AimesSoft/Erika'
     runs-on: ubuntu-latest
     permissions:
       contents: read

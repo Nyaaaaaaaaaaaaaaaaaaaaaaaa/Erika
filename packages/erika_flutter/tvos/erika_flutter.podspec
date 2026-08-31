@@ -57,9 +57,9 @@ Pod::Spec.new do |s|
   s.version          = '0.1.7'
   s.summary          = 'Flutter embedder glue for the Erika Rust media engine.'
   s.description      = <<-DESC
-Flutter tvOS plugin that hosts a CAMetalLayer and drives Erika through its C ABI.
+Flutter tvOS AV1/static AVIF plugin that hosts a CAMetalLayer and drives Erika through its C ABI.
                        DESC
-  s.homepage         = 'https://github.com/AimesSoft/Erika'
+  s.homepage         = 'https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika'
   s.license          = { :type => 'MPL-2.0' }
   s.author           = { 'AimesSoft' => 'dev@aimesoft.com' }
   s.source           = { :path => '.' }

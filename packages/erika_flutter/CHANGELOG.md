@@ -38,5 +38,5 @@
 - Exposed renderer resource status on Android, Windows, and OpenHarmony.
 - Restored Windows system media controls and tightened the OpenHarmony bridge.
 
-See the [repository changelog](https://github.com/AimesSoft/Erika/blob/main/CHANGELOG.md)
+See the [repository changelog](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/CHANGELOG.md)
 for native engine and earlier release details.

@@ -228,11 +228,13 @@ impl NativeDependencyProfile {
                 "--disable-doc",
                 "--disable-network",
                 "--disable-autodetect",
+                "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,mpegts,mpegps,mpegvideo,avi,flv,h264,hevc,av1,ivf,mp3,aac,flac,wav,ogg,ac3,eac3,dts,truehd,mlp,mjpeg,vc1,ass,srt,webvtt",
-                "--enable-parser=hevc,h264,av1,vp9,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,mpegvideo,mpeg4video,mjpeg,vc1,dvdsub,dvbsub",
-                "--enable-decoder=hevc,h264,av1,vp8,vp9,mpeg1video,mpeg2video,mpeg4,vc1,mjpeg,flv,theora,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt",
+                "--enable-bsf=extract_extradata",
+                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub",
+                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
             ],
             Self::GplFull => &[
                 "--enable-gpl",
@@ -243,11 +245,13 @@ impl NativeDependencyProfile {
                 "--disable-doc",
                 "--disable-network",
                 "--disable-autodetect",
+                "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,mpegts,mpegps,mpegvideo,avi,flv,h264,hevc,av1,ivf,mp3,aac,flac,wav,ogg,ac3,eac3,dts,truehd,mlp,mjpeg,vc1,ass,srt,webvtt",
-                "--enable-parser=hevc,h264,av1,vp9,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,mpegvideo,mpeg4video,mjpeg,vc1,dvdsub,dvbsub",
-                "--enable-decoder=hevc,h264,av1,vp8,vp9,mpeg1video,mpeg2video,mpeg4,vc1,mjpeg,flv,theora,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt",
+                "--enable-bsf=extract_extradata",
+                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub",
+                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
             ],
         }
     }
@@ -255,18 +259,24 @@ impl NativeDependencyProfile {
     fn ffmpeg_configure_flags_for_target(self, target: NativeTarget) -> Vec<&'static str> {
         let mut flags = self.ffmpeg_configure_flags().to_vec();
         if target.is_windows() {
-            flags.extend(["--enable-d3d11va", "--enable-dxva2"]);
+            flags.extend([
+                "--enable-d3d11va",
+                "--enable-dxva2",
+                "--enable-libdav1d",
+                "--enable-decoder=libdav1d",
+                "--enable-hwaccel=av1_d3d11va,av1_d3d11va2,av1_dxva2",
+            ]);
         } else if target.is_android() {
             flags.extend([
                 "--enable-jni",
                 "--enable-mediacodec",
                 "--enable-libdav1d",
-                "--enable-decoder=h264_mediacodec,hevc_mediacodec,mpeg2_mediacodec,mpeg4_mediacodec,vp8_mediacodec,vp9_mediacodec,av1_mediacodec,libdav1d",
+                "--enable-decoder=av1_mediacodec,libdav1d",
             ]);
             // FFmpeg's 32-bit external and inline x86 assembly still emits
             // absolute R_386_32 relocations even with CONFIG_PIC enabled.
             // Android has rejected text relocations since API 23, so keep the
-            // complete C decoder set while disabling the incompatible asm
+            // AV1 software fallback while disabling the incompatible assembly
             // acceleration paths for this legacy ABI.
             if matches!(target, NativeTarget::I686Android) {
                 flags.push("--disable-asm");
@@ -276,35 +286,28 @@ impl NativeDependencyProfile {
                 "--enable-videotoolbox",
                 "--enable-libdav1d",
                 "--enable-decoder=libdav1d",
+                "--enable-hwaccel=av1_videotoolbox",
             ]);
+        } else if target.uses_dav1d() {
+            flags.extend(["--enable-libdav1d", "--enable-decoder=libdav1d"]);
         }
         if target.is_android() {
-            assert_android_software_decoder_fallbacks(&flags);
+            assert_android_software_decoder_fallback(&flags);
         }
         flags
     }
 }
 
-fn assert_android_software_decoder_fallbacks(flags: &[&str]) {
+fn assert_android_software_decoder_fallback(flags: &[&str]) {
     let enabled = flags
         .iter()
         .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
         .flat_map(|decoders| decoders.split(','))
         .collect::<std::collections::HashSet<_>>();
-    for (hardware, software) in [
-        ("h264_mediacodec", "h264"),
-        ("hevc_mediacodec", "hevc"),
-        ("mpeg2_mediacodec", "mpeg2video"),
-        ("mpeg4_mediacodec", "mpeg4"),
-        ("vp8_mediacodec", "vp8"),
-        ("vp9_mediacodec", "vp9"),
-        ("av1_mediacodec", "libdav1d"),
-    ] {
-        assert!(
-            !enabled.contains(hardware) || enabled.contains(software),
-            "Android FFmpeg enables {hardware} without required software fallback {software}"
-        );
-    }
+    assert!(
+        !enabled.contains("av1_mediacodec") || enabled.contains("libdav1d"),
+        "Android FFmpeg enables av1_mediacodec without the required libdav1d fallback"
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -515,6 +518,10 @@ impl NativeTarget {
     fn is_ohos(self) -> bool {
         matches!(self, Self::Aarch64Ohos)
             || (matches!(self, Self::Host) && cfg!(target_env = "ohos"))
+    }
+
+    fn uses_dav1d(self) -> bool {
+        true
     }
 
     fn deployment_target(self) -> Option<(String, &'static str)> {
@@ -750,6 +757,8 @@ fn print_dependency_plan(profile: NativeDependencyProfile, target: NativeTarget)
     println!("ffmpeg: {FFMPEG_VERSION} ({})", FFMPEG_URLS[0]);
     if target.is_android() {
         println!("ffmpeg patch set: {FFMPEG_PATCHSET_VERSION}");
+    }
+    if target.uses_dav1d() {
         println!("dav1d: {DAV1D_VERSION} ({})", DAV1D_URLS[0]);
     }
     println!("libass: {LIBASS_VERSION} ({})", LIBASS_URLS[0]);
@@ -781,7 +790,7 @@ fn fetch_dependency_sources(layout: &WorkspaceLayout, all: bool) -> Result<()> {
     )?;
     apply_ffmpeg_patches(layout)?;
     fetch_and_extract(layout, ZLIB_URLS, ZLIB_ARCHIVE, ZLIB_DIR, None)?;
-    if layout.target.is_android() || layout.target.is_apple() {
+    if layout.target.uses_dav1d() {
         fetch_and_extract(layout, DAV1D_URLS, DAV1D_ARCHIVE, DAV1D_DIR, None)?;
     }
     if all {
@@ -804,7 +813,7 @@ fn build_dependencies(options: DepsOptions) -> Result<()> {
     prepare_dependency_dirs(&layout)?;
     fetch_dependency_sources(&layout, options.all)?;
     build_zlib(&layout, options)?;
-    if options.target.is_android() || options.target.is_apple() {
+    if options.target.uses_dav1d() {
         build_dav1d(&layout, options)?;
     }
     build_ffmpeg(&layout, options)?;
@@ -1007,6 +1016,15 @@ fn ensure_required_tools(options: DepsOptions, layout: &WorkspaceLayout) -> Resu
         if cmake_tool().is_none() {
             bail!("required CMake was not found for the OpenHarmony dependency build");
         }
+        if python_tool().is_none() && (which("meson").is_none() || which("ninja").is_none()) {
+            bail!(
+                "required Python with venv support was not found; OpenHarmony dav1d needs Meson/Ninja and xtask cannot provision them"
+            );
+        }
+        let _ = ensure_meson_tools(layout)?;
+        let _ = ensure_pkg_config_shim(layout)?;
+        let _ = host_c_compiler()?;
+        let _ = host_cxx_compiler()?;
         return Ok(());
     }
 
@@ -1105,10 +1123,15 @@ fn build_zlib(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
 }
 
 fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    if !options.target.is_android() && !options.target.is_apple() {
+    if !options.target.uses_dav1d() {
         return Ok(());
     }
     if dav1d_build_marker_is_current(layout, options) && !options.force {
+        ensure_windows_link_aliases(
+            options.target,
+            &layout.dav1d_prefix,
+            &[("libdav1d.a", "dav1d.lib")],
+        )?;
         println!(
             "reuse dav1d build marker {}",
             layout.dav1d_build_marker.display()
@@ -1148,6 +1171,9 @@ fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         .arg("-Denable_tests=false")
         .arg("-Denable_docs=false")
         .arg("-Dlogging=true");
+    if options.target.is_windows() {
+        setup.arg("-Db_vscrt=mt");
+    }
     apply_meson_target(&mut setup, layout, options.target, "dav1d")?;
     apply_windows_target_env(&mut setup, options.target)?;
     run(&mut setup)?;
@@ -1157,18 +1183,26 @@ fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         options.jobs,
         options.target,
     )?;
+    ensure_windows_link_aliases(
+        options.target,
+        &layout.dav1d_prefix,
+        &[("libdav1d.a", "dav1d.lib")],
+    )?;
 
-    let archive = layout.dav1d_prefix.join("lib/libdav1d.a");
     let pkg_config = layout.dav1d_prefix.join("lib/pkgconfig/dav1d.pc");
-    for path in [&archive, &pkg_config] {
-        if !path.is_file() {
-            bail!("dav1d install did not produce {}", path.display());
-        }
+    if !native_static_lib_exists(&layout.dav1d_prefix, "dav1d") {
+        bail!(
+            "dav1d install did not produce a static library under {}",
+            layout.dav1d_prefix.join("lib").display()
+        );
+    }
+    if !pkg_config.is_file() {
+        bail!("dav1d install did not produce {}", pkg_config.display());
     }
     fs::write(
         &layout.dav1d_build_marker,
         format!(
-            "dav1d={DAV1D_VERSION}\ntarget={}\nandroid_api={}\ndeployment_target={}\nasm={asm_enabled}\nprefix={}\n",
+            "dav1d={DAV1D_VERSION}\ntarget={}\nandroid_api={}\ndeployment_target={}\nasm={asm_enabled}\nmsvc_runtime={}\nprefix={}\n",
             options.target.triple().unwrap_or("host"),
             if options.target.is_android() {
                 android_api_level()?.to_string()
@@ -1176,6 +1210,11 @@ fn build_dav1d(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
                 "n/a".to_string()
             },
             native_deployment_target(options.target),
+            if options.target.is_windows() {
+                "static"
+            } else {
+                "n/a"
+            },
             layout.dav1d_prefix.display(),
         ),
     )
@@ -1194,6 +1233,7 @@ fn dav1d_requires_nasm(target: NativeTarget) -> bool {
         NativeTarget::X86_64Macos
             | NativeTarget::X86_64IosSimulator
             | NativeTarget::X86_64TvosSimulator
+            | NativeTarget::X86_64WindowsMsvc
             | NativeTarget::X86_64Android
     )
 }
@@ -1769,6 +1809,31 @@ fn meson_cross_file(
                 target
                     .meson_cpu()
                     .context("explicit Android target must have a Meson CPU")?,
+            ),
+        )
+    } else if let Some(config) = ohos_toolchain(target)? {
+        let pkg_config = ensure_pkg_config_shim(layout)?;
+        let pic_flags = vec!["-fPIC".to_string()];
+        format!(
+            "[binaries]\nc = {}\ncpp = {}\nar = {}\nstrip = {}\npkg-config = {}\n\n[built-in options]\nc_args = {}\ncpp_args = {}\nc_link_args = {}\ncpp_link_args = {}\n\n[properties]\nneeds_exe_wrapper = true\n\n[host_machine]\nsystem = 'linux'\ncpu_family = {}\ncpu = {}\nendian = 'little'\n",
+            meson_string(&config.clang.display().to_string()),
+            meson_string(&config.clangxx.display().to_string()),
+            meson_string(&config.ar.display().to_string()),
+            meson_string(&config.strip.display().to_string()),
+            meson_string(&pkg_config.display().to_string()),
+            meson_array(&pic_flags),
+            meson_array(&pic_flags),
+            meson_array(&pic_flags),
+            meson_array(&pic_flags),
+            meson_string(
+                target
+                    .meson_cpu_family()
+                    .context("explicit OpenHarmony target must have a Meson CPU family")?,
+            ),
+            meson_string(
+                target
+                    .meson_cpu()
+                    .context("explicit OpenHarmony target must have a Meson CPU")?,
             ),
         )
     } else if matches!(target, NativeTarget::Aarch64WindowsMsvc) {
@@ -2565,7 +2630,7 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         "--prefix={}",
         path_to_forward_slashes(&layout.ffmpeg_prefix)
     ));
-    if options.target.is_android() || options.target.is_apple() {
+    if options.target.uses_dav1d() {
         let pkg_config = ensure_pkg_config_shim(layout)?;
         let dav1d_pkg_config_dir = layout.dav1d_prefix.join("lib/pkgconfig");
         configure
@@ -2618,20 +2683,18 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
             "-I{}",
             ffmpeg_flag_path_arg(&layout.zlib_prefix.join("include"))
         ));
+        extra_cflags.push(format!(
+            "-I{}",
+            ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("include"))
+        ));
         extra_ldflags.push(format!(
             "-L{}",
             ffmpeg_flag_path_arg(&layout.zlib_prefix.join("lib"))
         ));
-        if options.target.is_apple() {
-            extra_cflags.push(format!(
-                "-I{}",
-                ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("include"))
-            ));
-            extra_ldflags.push(format!(
-                "-L{}",
-                ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("lib"))
-            ));
-        }
+        extra_ldflags.push(format!(
+            "-L{}",
+            ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("lib"))
+        ));
         clear_apple_deployment_target_env(&mut configure);
         configure.env("SDKROOT", &config.sdk_root);
         match options.target {
@@ -2709,9 +2772,17 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
             "-I{}",
             ffmpeg_flag_path_arg(&layout.zlib_prefix.join("include"))
         ));
+        extra_cflags.push(format!(
+            "-I{}",
+            ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("include"))
+        ));
         extra_ldflags.push(format!(
             "-L{}",
             ffmpeg_flag_path_arg(&layout.zlib_prefix.join("lib"))
+        ));
+        extra_ldflags.push(format!(
+            "-L{}",
+            ffmpeg_flag_path_arg(&layout.dav1d_prefix.join("lib"))
         ));
     } else if options.target.is_windows() {
         configure.arg("--target-os=win64");
@@ -2825,7 +2896,7 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         format!(
             "ffmpeg={FFMPEG_VERSION}\npatchset={}\nzlib={ZLIB_VERSION}\ndav1d={}\nprofile={}\ntarget={}\nandroid_api={}\ndeployment_target={}\nprefix={}\nflags={}\n",
             ffmpeg_patchset,
-            if options.target.is_android() || options.target.is_apple() {
+            if options.target.uses_dav1d() {
                 DAV1D_VERSION
             } else {
                 "n/a"
@@ -3317,7 +3388,7 @@ fn ffmpeg_build_marker_is_current(layout: &WorkspaceLayout, options: DepsOptions
         && marker.contains(&format!("zlib={ZLIB_VERSION}\n"))
         && marker.contains(&format!(
             "dav1d={}\n",
-            if options.target.is_android() || options.target.is_apple() {
+            if options.target.uses_dav1d() {
                 DAV1D_VERSION
             } else {
                 "n/a"
@@ -3364,7 +3435,7 @@ fn ffmpeg_install_is_complete(layout: &WorkspaceLayout, target: NativeTarget) ->
 }
 
 fn dav1d_build_marker_is_current(layout: &WorkspaceLayout, options: DepsOptions) -> bool {
-    if !options.target.is_android() && !options.target.is_apple() {
+    if !options.target.uses_dav1d() {
         return true;
     }
     let Ok(marker) = fs::read_to_string(&layout.dav1d_build_marker) else {
@@ -3386,6 +3457,14 @@ fn dav1d_build_marker_is_current(layout: &WorkspaceLayout, options: DepsOptions)
                 native_deployment_target(options.target)
             ))
             && marker.contains(&format!("asm={}\n", dav1d_asm_enabled(options.target)))
+            && marker.contains(&format!(
+                "msvc_runtime={}\n",
+                if options.target.is_windows() {
+                    "static"
+                } else {
+                    "n/a"
+                }
+            ))
     }
 }
 
@@ -3440,12 +3519,12 @@ fn write_profile_metadata(
             FFMPEG_VERSION,
             ffmpeg_patchset,
             layout.ffmpeg_prefix.display(),
-            if target.is_android() || target.is_apple() {
+            if target.uses_dav1d() {
                 DAV1D_VERSION
             } else {
                 "n/a"
             },
-            if target.is_android() || target.is_apple() {
+            if target.uses_dav1d() {
                 layout.dav1d_prefix.display().to_string()
             } else {
                 "n/a".to_string()
@@ -3782,7 +3861,14 @@ struct PkgConfigQuery {
 impl PkgConfigQuery {
     fn parse(args: Vec<String>) -> Self {
         let mut query = Self::default();
-        for arg in args {
+        // FFmpeg passes version requirements as one quoted pkg-config argument.
+        // Windows batch forwarding preserves that grouping, so normalize it
+        // before interpreting operators and versions.
+        for arg in args.into_iter().flat_map(|arg| {
+            arg.split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        }) {
             match arg.as_str() {
                 "--version" => query.version = true,
                 "--exists" => query.exists = true,
@@ -4401,6 +4487,12 @@ fn msys2_usr_bin() -> Option<PathBuf> {
 
 fn windows_posix_bin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    if let Some(git) = which("git") {
+        if let Some(root) = git.parent().and_then(Path::parent) {
+            dirs.push(root.join("usr/bin"));
+            dirs.push(root.join("bin"));
+        }
+    }
     if let Some(root) = env::var_os("MSYS2_ROOT") {
         let root = PathBuf::from(root);
         dirs.push(root.join("usr/bin"));
@@ -4847,6 +4939,47 @@ mod tests {
     }
 
     #[test]
+    fn ffmpeg_profiles_enable_only_the_av1_visual_stack() {
+        for profile in [
+            NativeDependencyProfile::Lgpl,
+            NativeDependencyProfile::GplFull,
+        ] {
+            let flags = profile.ffmpeg_configure_flags();
+            assert!(flags.contains(&"--disable-everything"));
+            assert!(flags.contains(&"--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt"));
+            assert!(flags.contains(&"--enable-bsf=extract_extradata"));
+            assert!(flags.contains(
+                &"--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub"
+            ));
+
+            let decoders = flags
+                .iter()
+                .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
+                .flat_map(|value| value.split(','))
+                .collect::<HashSet<_>>();
+            assert!(decoders.contains("av1"));
+            for forbidden in [
+                "h264",
+                "hevc",
+                "vp8",
+                "vp9",
+                "mpeg1video",
+                "mpeg2video",
+                "mpeg4",
+                "vc1",
+                "mjpeg",
+                "flv",
+                "theora",
+            ] {
+                assert!(
+                    !decoders.contains(forbidden),
+                    "unexpected decoder {forbidden}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn android_ffmpeg_plan_enables_mediacodec_without_videotoolbox() {
         for profile in [
             NativeDependencyProfile::Lgpl,
@@ -4856,16 +4989,14 @@ mod tests {
             assert!(flags.contains(&"--enable-jni"));
             assert!(flags.contains(&"--enable-mediacodec"));
             assert!(flags.contains(&"--enable-libdav1d"));
-            assert!(flags.iter().any(|flag| {
-                flag.contains("h264_mediacodec")
-                    && flag.contains("vp8_mediacodec")
-                    && flag.contains("av1_mediacodec")
-                    && flag.contains("libdav1d")
-            }));
-            assert!(flags.iter().any(|flag| {
-                flag.strip_prefix("--enable-decoder=")
-                    .is_some_and(|decoders| decoders.split(',').any(|decoder| decoder == "vp8"))
-            }));
+            assert!(
+                flags
+                    .iter()
+                    .any(|flag| { flag == &"--enable-decoder=av1_mediacodec,libdav1d" })
+            );
+            assert!(!flags.iter().any(|flag| flag.contains("h264_mediacodec")));
+            assert!(!flags.iter().any(|flag| flag.contains("vp8_mediacodec")));
+            assert!(!flags.iter().any(|flag| flag.contains("vp9_mediacodec")));
             assert!(!flags.contains(&"--enable-videotoolbox"));
         }
     }
@@ -4881,7 +5012,42 @@ mod tests {
             assert!(flags.contains(&"--enable-videotoolbox"));
             assert!(flags.contains(&"--enable-libdav1d"));
             assert!(flags.contains(&"--enable-decoder=libdav1d"));
+            assert!(flags.contains(&"--enable-hwaccel=av1_videotoolbox"));
         }
+    }
+
+    #[test]
+    fn windows_ffmpeg_plan_enables_only_av1_hardware_acceleration() {
+        let flags = NativeDependencyProfile::Lgpl
+            .ffmpeg_configure_flags_for_target(NativeTarget::X86_64WindowsMsvc);
+        assert!(flags.contains(&"--enable-d3d11va"));
+        assert!(flags.contains(&"--enable-dxva2"));
+        assert!(flags.contains(&"--enable-libdav1d"));
+        assert!(flags.contains(&"--enable-decoder=libdav1d"));
+        assert!(flags.contains(&"--enable-hwaccel=av1_d3d11va,av1_d3d11va2,av1_dxva2"));
+    }
+
+    #[test]
+    fn pkg_config_query_splits_quoted_version_requirements() {
+        let query = PkgConfigQuery::parse(vec![
+            "--exists".to_string(),
+            "--print-errors".to_string(),
+            "dav1d >= 1.0.0".to_string(),
+        ]);
+
+        assert!(query.exists);
+        assert_eq!(query.packages, ["dav1d"]);
+    }
+
+    #[test]
+    fn ohos_ffmpeg_plan_uses_dav1d_without_avcodec_video_decoders() {
+        let target = NativeTarget::Aarch64Ohos;
+        let flags = NativeDependencyProfile::Lgpl.ffmpeg_configure_flags_for_target(target);
+        assert!(target.uses_dav1d());
+        assert!(flags.contains(&"--enable-libdav1d"));
+        assert!(flags.contains(&"--enable-decoder=libdav1d"));
+        assert!(!flags.contains(&"--enable-mediacodec"));
+        assert!(!flags.contains(&"--enable-videotoolbox"));
     }
 
     #[test]
@@ -4905,6 +5071,7 @@ mod tests {
         assert!(dav1d_requires_nasm(NativeTarget::X86_64Macos));
         assert!(dav1d_requires_nasm(NativeTarget::X86_64IosSimulator));
         assert!(dav1d_requires_nasm(NativeTarget::X86_64TvosSimulator));
+        assert!(dav1d_requires_nasm(NativeTarget::X86_64WindowsMsvc));
         assert!(dav1d_requires_nasm(NativeTarget::X86_64Android));
         assert!(!dav1d_requires_nasm(NativeTarget::Aarch64Macos));
         assert!(!dav1d_requires_nasm(NativeTarget::Aarch64Ios));
@@ -5004,7 +5171,7 @@ mod tests {
             &current, profile, target
         ));
 
-        let stale = current.replace(",vp8,vp9", ",vp9");
+        let stale = current.replace("av1_mediacodec,libdav1d", "av1_mediacodec");
         assert!(!ffmpeg_build_marker_has_current_flags(
             &stale, profile, target
         ));

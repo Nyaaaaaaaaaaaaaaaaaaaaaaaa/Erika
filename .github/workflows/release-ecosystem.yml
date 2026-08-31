@@ -2,7 +2,8 @@ name: Release ecosystem packages
 
 # A native vX.Y.Z release is the single release trigger. The Release workflow
 # creates the archives and SHA256SUMS first; this workflow then publishes the
-# package targets that consume those archives.
+# package targets that consume those archives. Ecosystem publishing remains
+# owned by the upstream repository; forks may still publish native releases.
 on:
   workflow_run:
     workflows: ["Release"]
@@ -19,6 +20,7 @@ jobs:
   version:
     name: Resolve release version
     if: >-
+      github.repository == 'AimesSoft/Erika' &&
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest

@@ -37,10 +37,10 @@ cargo build -p erika_capi
 
 ## Prebuilt package と source build
 
-plugin は既定で現在の version に対応する `v0.1.7` native library を download し、SHA-256 を検証します。download または検証の失敗は明示的な error になり、source build へ暗黙に fallback しません。Erika checkout の local source を debug するときだけ `ERIKA_FORCE_SOURCE_BUILD=1` を設定してください。custom `ERIKA_PREBUILT_TAG` の single-ABI build には対応する `ERIKA_PREBUILT_SHA256` が必要です。Android multi-ABI build では `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64`、`ERIKA_PREBUILT_SHA256_X86` を ABI ごとに指定します。詳細は [release guide](https://github.com/AimesSoft/Erika/blob/main/docs/releasing.ja.md) を参照してください。
+plugin は既定で `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` から現在の version に対応する `v0.1.7` native library を download し、SHA-256 を検証します。`ERIKA_PREBUILT_REPOSITORY=owner/repo` で上書きできます。organization が asset を公開するまで download は明示的に失敗し、source build または upstream の full-codec binary へ暗黙に fallback しません。Erika checkout の local source を debug するときだけ `ERIKA_FORCE_SOURCE_BUILD=1` を設定してください。custom `ERIKA_PREBUILT_TAG` の single-ABI build には対応する `ERIKA_PREBUILT_SHA256` が必要です。Android multi-ABI build では `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64`、`ERIKA_PREBUILT_SHA256_X86` を ABI ごとに指定します。詳細は [release guide](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/releasing.ja.md) を参照してください。
 Android は要求された ABI ごとに約 20–22MB の runtime archive だけを download し、4 ABI combined C API bundle や static library は取得しません。
 
-source build の architecture は macOS では `ERIKA_MACOS_ARCHS=arm64|x86_64|universal`、Windows では `ERIKA_WINDOWS_ARCH=x64|arm64`、Android では `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86` で選択します。native library を直接 build する場合、`xtask --target`、`ERIKA_NATIVE_TARGET`、`cargo build --target` は同じ target にしてください。詳細は [build guide](https://github.com/AimesSoft/Erika/blob/main/docs/building.ja.md) を参照してください。
+source build の architecture は macOS では `ERIKA_MACOS_ARCHS=arm64|x86_64|universal`、Windows では `ERIKA_WINDOWS_ARCH=x64|arm64`、Android では `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86` で選択します。native library を直接 build する場合、`xtask --target`、`ERIKA_NATIVE_TARGET`、`cargo build --target` は同じ target にしてください。詳細は [build guide](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/building.ja.md) を参照してください。
 
 macOS plugin は Now Playing を通じてタイトル、アーティスト、アルバム、artwork、再生状態、timeline を公開し、Remote Command Center からの再生、一時停止、停止、seek を処理します。
 
@@ -205,12 +205,11 @@ HarmonyOS では `ErikaVideoView` を使ってください。Flutter external te
 その texture surface を `OHNativeWindow` として取得して、wgpu Vulkan で描画します。
 音声は OHAudio の interleaved f32 PCM です。
 
-video decode は既定で HarmonyOS AVCodec の hardware decode（H.264 / HEVC）です。
-AVCodec は Surface に描画し、その `OHNativeBuffer` を Vulkan external image として
-import して Vulkan YCbCr sampler で解決するため、フレームは CPU コピーなしで
-compositor に届きます。必要な Vulkan extension を持たない端末は FFmpeg software
-decode と CPU upload に fallback します。fallback は再生を失敗させず、
-`VideoDecoderChanged` event と presenter diagnostics から報告されます。
+この AV1/AVIF 専用 fork は HarmonyOS で dav1d software decode を既定にします。
+保持されている AVCodec integration は H.264/HEVC のみ対応するため、supported media には選択されません。
+dav1d frame は既存の CPU-upload path で Vulkan compositor に渡されます。AVCodec
+Surface integration は ABI/source compatibility のためだけに保持され、この fork の
+media support 対象外です。
 
 ## HTTP ヘッダー
 

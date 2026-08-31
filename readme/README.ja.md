@@ -13,10 +13,19 @@
 
 ホストアプリケーションはレンダリングサーフェスの提供と再生コマンドの送信のみを行い、デコード、タイミング同期、映像レンダリング、字幕、弾幕、音声出力はすべて Erika 内部で完結します。
 
+## この fork のメディア範囲
+
+`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` は既存の crate、C ABI、Flutter/ArkTS
+package 名、cross-platform rendering interface を維持し、visual media を次に限定します。
+
+- MP4/MOV、Matroska/MKV、WebM、IVF、raw AV1/OBU の動的 AV1 video。
+- 単一の静的 primary image の AVIF。animated AVIF と image sequence は互換性対象外で、EOF 後も decode 済み image を surface に保持します。
+- 音声、埋め込み/外部字幕、弾幕は AV1 playback の付随機能です。audio-only media と他の visual codec は拒否します。
+
 ## 機能
 
-- **ハードウェアアクセラレーション** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA (Windows)、MediaCodec (Android)、AVCodec (HarmonyOS)。相互運用不可時は明示的に software decode へ fallback
-- **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)、AVCodec Surface → OHNativeBuffer/Vulkan (HarmonyOS)。import 失敗時は明示的に CPU upload へ fallback
+- **AV1 hardware decode** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)。利用不可時は AV1 software decode へ fallbackし、HarmonyOS は dav1d を直接選択
+- **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)。software frame は明示的な CPU upload を使用
 - **HDR/EDR 出力** -- Apple EDR、Windows HDR10、Android FP16 extended-linear scRGB negotiation と明示的な SDR fallback
 - **Metal ネイティブレンダラー** -- YCbCr サンプリング、色空間変換、トーンマッピング、字幕/弾幕合成を単一レンダーパスで実行 (macOS/iOS/tvOS)
 - **Direct3D 11 ネイティブレンダラー** -- Windows: D3D11VA ゼロコピーテクスチャ相互運用、YCbCr サンプリング、HDR10 出力、字幕/弾幕 overlay 合成
@@ -72,26 +81,16 @@ ErikaVideoView(player: player)
 
 ### Flutter パッケージ
 
-`erika_flutter` 0.1.7 は [pub.dev](https://pub.dev/packages/erika_flutter) で公開されています。
-macOS、iOS、tvOS、Windows、Android、HarmonyOS/OpenHarmony に対応しています。
-Flutter アプリには次のコマンドで追加できます：
-
-```sh
-flutter pub add erika_flutter
-```
-
-platform build 時に対応する検証済み native runtime を download します。Android
-では選択された ABI の archive だけを download します。Linux と Web はまだ公開対象ではありません。
+この fork は pub.dev package と prebuilt runtime をまだ公開していません。
+source checkout から `ERIKA_FORCE_SOURCE_BUILD=1` で利用してください。prebuilt script の
+既定 repository は `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` で、
+`ERIKA_PREBUILT_REPOSITORY` により上書きできます。organization が対応 asset を公開するまで
+prebuilt mode は明示的に失敗し、upstream の full-codec binary へ fallback しません。
 
 ### OpenHarmony パッケージ
 
-ネイティブ ArkTS パッケージ `erika` 0.1.7 は
-[OHPM](https://ohpm.openharmony.cn/#/cn/detail/erika) で公開されています。
-OpenHarmony arm64（API 18 以上）のアプリには次のコマンドで追加できます：
-
-```sh
-ohpm install erika
-```
+この fork は OHPM package をまだ公開していません。`packages/erika_ohos` の source を
+組み込んでください。同名の upstream package はこの fork の AV1/AVIF-only contract を持ちません。
 
 このパッケージは Flutter に依存しません。`ErikaPlayer` API と
 `XComponent` サーフェスの設定は
@@ -112,13 +111,13 @@ ohpm install erika
 
 | プラットフォーム | デコード | レンダリング | 音声 | 状態 |
 |----------------|---------|-------------|------|------|
-| macOS 14+ | VideoToolbox | Metal | CoreAudio | **利用可能** |
-| iOS 16+ | VideoToolbox | Metal | AudioQueue | **利用可能** |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | **利用可能** |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | **利用可能** |
+| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **利用可能** |
+| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **利用可能** |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **利用可能** |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **利用可能** |
 | Linux | -- | wgpu (計画中) | -- | 計画中 |
-| Android 8+ | MediaCodec / software | wgpu (Vulkan + GLES fallback) | AAudio | **利用可能**。SDR は検証済み、extended-linear scRGB は実装済み、API 35 HDR 実機の active path acceptance 待ち |
-| HarmonyOS API 18+ | AVCodec (H.264/HEVC) / software | wgpu (Vulkan) + `OHNativeBuffer` zero-copy import | OHAudio | **利用可能**。実機で検証済み、CI は未カバー |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **利用可能**。この fork の実機 acceptance は未実施 |
+| HarmonyOS API 18+ | AV1 dav1d software decode | wgpu (Vulkan) | OHAudio | **利用可能**。この fork の実機 acceptance は未実施 |
 
 ## リポジトリ構成
 

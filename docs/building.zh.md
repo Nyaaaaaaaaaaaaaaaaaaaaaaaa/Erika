@@ -199,9 +199,12 @@ cdylib 与匹配 ABI 的 NDK `libc++_shared.so`。
 
 原生构建按 profile 分割,使许可证边界明确:
 
-- **`lgpl`**(默认)—— FFmpeg 配置为 `--disable-gpl --enable-version3`,静态,无网络,
-  仅 file 协议,一组精选的 demuxer/decoder/parser,启用 zlib,外加 VideoToolbox(Apple)、
-  D3D11VA/DXVA2(Windows)或 JNI/MediaCodec + 源码构建的 dav1d AV1 软解回退(Android 与 Apple 目标)。
+- **`lgpl`**(默认)—— FFmpeg 先 `--disable-everything`,再启用
+  `--disable-gpl --enable-version3`、静态、无网络和仅 file 协议。视觉 decoder/parser
+  白名单只有 AV1；demuxer 只覆盖 MP4/MOV/AVIF、Matroska/WebM、IVF、raw AV1 及
+  ASS/SRT/WebVTT。音频和字幕 decoder 只服务于 AV1 播放。AV1 硬解只启用
+  VideoToolbox(Apple)、D3D11VA/DXVA2(Windows)和 MediaCodec(Android)；除 Windows
+  外的所有目标（包括 OpenHarmony）都用 dav1d 软解回退。
 - **`gpl-full`** —— 同一集合加 `--enable-gpl`。仅当你接受产物的 GPL 条款时使用。
 
 Rust workspace 本身是 MPL-2.0(见 [`LICENSE`](../LICENSE))。`xtask` 与你的
@@ -255,11 +258,10 @@ cargo test --workspace               # 单元 + 集成测试
 - Android:每 ABI 一个 `liberika_capi.so` 与匹配的 NDK
   `libc++_shared.so`;同时保留 `liberika_capi.a` 供原生嵌入方使用。
 
-Android FFmpeg 明确保留 H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9、AV1 的
-MediaCodec decoder。主路径让 MediaCodec 输出软件可读 YUV,继续复用共享 wgpu 上传、
+Android FFmpeg 的视觉硬解只保留 AV1 MediaCodec decoder。主路径让 MediaCodec 输出软件可读 YUV,继续复用共享 wgpu 上传、
 字幕、弹幕和截图合成。这是“硬解 + CPU upload”,不是 Surface 零拷贝,统计与日志必须
 如实区分。AV1 MediaCodec 无法打开或解码失败时,软件路径会显式选择 FFmpeg 的
-`libdav1d` decoder。`xtask` 为全部 Android ABI 与 Apple 目标从源码构建 dav1d 1.5.1,同时支持
+`libdav1d` decoder。`xtask` 为所有目标从源码构建 dav1d 1.5.1,同时支持
 8-bit 与高位深;32 位 x86 为保证 PIC 安全会禁用汇编。
 
 ### 验证 Android 输出协商

@@ -33,6 +33,15 @@ set(ERIKA_RUNTIME "")
 
 set(ERIKA_USE_PREBUILT ON)
 if(NOT "$ENV{ERIKA_FORCE_SOURCE_BUILD}" STREQUAL "1")
+  if("$ENV{ERIKA_PREBUILT_REPOSITORY}" STREQUAL "")
+    set(ERIKA_PREBUILT_REPOSITORY "Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika")
+  else()
+    set(ERIKA_PREBUILT_REPOSITORY "$ENV{ERIKA_PREBUILT_REPOSITORY}")
+  endif()
+  if(NOT ERIKA_PREBUILT_REPOSITORY MATCHES "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    message(FATAL_ERROR
+      "ERIKA_PREBUILT_REPOSITORY must be a GitHub owner/repository pair")
+  endif()
   if("$ENV{ERIKA_PREBUILT_TAG}" STREQUAL "")
     set(ERIKA_PREBUILT_TAG "${ERIKA_DEFAULT_PREBUILT_TAG}")
   else()
@@ -60,7 +69,7 @@ if(NOT "$ENV{ERIKA_FORCE_SOURCE_BUILD}" STREQUAL "1")
     "${ERIKA_PREBUILT_DIR}/erika-capi-openharmony-arm64/lib/liberika_capi.so"
   )
   set(ERIKA_PREBUILT_URL
-    "https://github.com/AimesSoft/Erika/releases/download/${ERIKA_PREBUILT_TAG}/erika-capi-openharmony-arm64.zip"
+    "https://github.com/${ERIKA_PREBUILT_REPOSITORY}/releases/download/${ERIKA_PREBUILT_TAG}/erika-capi-openharmony-arm64.zip"
   )
 
   if(EXISTS "${ERIKA_PREBUILT_ZIP}")

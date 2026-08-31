@@ -6,6 +6,15 @@ readonly FIXTURE_NAME="playback-fixture.mkv"
 readonly FIXTURE_PATH="${SCRIPT_DIR}/${FIXTURE_NAME}"
 readonly CHECKSUM_PATH="${SCRIPT_DIR}/SHA256SUMS"
 readonly REQUIRED_VERSION="8.1.2"
+readonly AV1_FIXTURE_NAMES=(
+  "playback-fixture.mkv"
+  "av1-video.mp4"
+  "av1-video.mov"
+  "av1-video.webm"
+  "av1-video.ivf"
+  "av1-video.obu"
+  "static.avif"
+)
 
 usage() {
   cat <<'EOF'
@@ -20,6 +29,13 @@ EOF
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+native_path() {
+  case "$(uname -s)" in
+    CYGWIN*) cygpath -w "$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
 }
 
 mode="check"
@@ -39,7 +55,7 @@ case "${1:-}" in
     ;;
 esac
 
-for tool in ffmpeg ffprobe shasum cmp awk; do
+for tool in ffmpeg ffprobe sha256sum cmp awk; do
   command -v "${tool}" >/dev/null 2>&1 || fail "required tool not found: ${tool}"
 done
 
@@ -48,7 +64,7 @@ check_version() {
   local first_line
   first_line="$("${tool}" -version | awk 'NR == 1 { print; exit }')"
   case "${first_line}" in
-    "${tool} version ${REQUIRED_VERSION}" | "${tool} version ${REQUIRED_VERSION} "*)
+    "${tool} version ${REQUIRED_VERSION}" | "${tool} version ${REQUIRED_VERSION} "* | "${tool} version ${REQUIRED_VERSION}-"*)
       ;;
     *)
       fail "${tool} ${REQUIRED_VERSION} is required; found: ${first_line}"
@@ -62,8 +78,15 @@ check_version ffprobe
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/erika-playback-fixture.XXXXXX")"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-generate_fixture() {
-  local output="$1"
+generate_fixture_set() {
+  local output_dir="$1"
+  local output="${output_dir}/${FIXTURE_NAME}"
+  local output_native
+  local script_dir_native
+
+  mkdir -p "${output_dir}"
+  output_native="$(native_path "${output}")"
+  script_dir_native="$(native_path "${SCRIPT_DIR}")"
 
   ffmpeg \
     -hide_banner \
@@ -78,9 +101,9 @@ generate_fixture() {
     -f lavfi \
     -i "aevalsrc=0.25*sin(2*PI*1320*t)*lt(mod(t\,1)\,0.1):sample_rate=48000:duration=8:channel_layout=mono" \
     -f srt \
-    -i "${SCRIPT_DIR}/track-a.srt" \
+    -i "${script_dir_native}/track-a.srt" \
     -f srt \
-    -i "${SCRIPT_DIR}/track-b.srt" \
+    -i "${script_dir_native}/track-b.srt" \
     -map 0:v:0 \
     -map 1:a:0 \
     -map 2:a:0 \
@@ -88,13 +111,18 @@ generate_fixture() {
     -map 4:s:0 \
     -map_metadata -1 \
     -fflags +bitexact \
-    -c:v mpeg4 \
+    -c:v libaom-av1 \
+    -cpu-used:v 8 \
+    -row-mt:v 0 \
+    -tiles:v 1x1 \
+    -lag-in-frames:v 0 \
+    -crf:v 35 \
+    -b:v 0 \
     -pix_fmt yuv420p \
     -r:v 30 \
     -g:v 30 \
-    -bf:v 0 \
+    -keyint_min:v 30 \
     -sc_threshold:v 0 \
-    -qscale:v 5 \
     -threads:v 1 \
     -flags:v +bitexact \
     -c:a flac \
@@ -123,7 +151,74 @@ generate_fixture() {
     -t 8 \
     -bitexact \
     -f matroska \
-    -y "${output}"
+    -y "${output_native}"
+
+  # The MP4/MOV demuxer family is exercised with both common filename forms.
+  # FFmpeg's AV1 muxing policy requires the ISO-BMFF flavour even for .mov.
+  ffmpeg -hide_banner -loglevel error -nostdin -i "${output_native}" -map 0:v:0 \
+    -map_metadata -1 -frames:v 30 -c:v copy -fflags +bitexact -bitexact \
+    -f mp4 -y "$(native_path "${output_dir}/av1-video.mp4")"
+  ffmpeg -hide_banner -loglevel error -nostdin -i "${output_native}" -map 0:v:0 \
+    -map_metadata -1 -frames:v 30 -c:v copy -fflags +bitexact -bitexact \
+    -f mp4 -y "$(native_path "${output_dir}/av1-video.mov")"
+  ffmpeg -hide_banner -loglevel error -nostdin -i "${output_native}" -map 0:v:0 \
+    -map_metadata -1 -frames:v 30 -c:v copy -fflags +bitexact -bitexact \
+    -f webm -y "$(native_path "${output_dir}/av1-video.webm")"
+  ffmpeg -hide_banner -loglevel error -nostdin -i "${output_native}" -map 0:v:0 \
+    -map_metadata -1 -frames:v 30 -c:v copy -fflags +bitexact -bitexact \
+    -f ivf -y "$(native_path "${output_dir}/av1-video.ivf")"
+  # Encode raw low-overhead OBU directly so the sequence header is carried in
+  # band; remuxing the Matroska track would leave it only in codec extradata.
+  ffmpeg \
+    -hide_banner \
+    -loglevel error \
+    -nostdin \
+    -filter_threads 1 \
+    -f lavfi \
+    -i "testsrc2=size=160x90:rate=30:duration=1" \
+    -map_metadata -1 \
+    -frames:v 30 \
+    -c:v libaom-av1 \
+    -cpu-used:v 8 \
+    -row-mt:v 0 \
+    -tiles:v 1x1 \
+    -lag-in-frames:v 0 \
+    -crf:v 35 \
+    -b:v 0 \
+    -pix_fmt yuv420p \
+    -r:v 30 \
+    -g:v 30 \
+    -keyint_min:v 30 \
+    -threads:v 1 \
+    -flags:v +bitexact \
+    -fflags +bitexact \
+    -bitexact \
+    -f obu \
+    -y "$(native_path "${output_dir}/av1-video.obu")"
+
+  ffmpeg \
+    -hide_banner \
+    -loglevel error \
+    -nostdin \
+    -filter_threads 1 \
+    -f lavfi \
+    -i "testsrc2=size=160x90:rate=1:duration=1" \
+    -map_metadata -1 \
+    -frames:v 1 \
+    -c:v libaom-av1 \
+    -still-picture 1 \
+    -cpu-used:v 8 \
+    -row-mt:v 0 \
+    -tiles:v 1x1 \
+    -threads:v 1 \
+    -lag-in-frames:v 0 \
+    -crf:v 35 \
+    -b:v 0 \
+    -pix_fmt yuv420p \
+    -flags:v +bitexact \
+    -bitexact \
+    -f avif \
+    -y "$(native_path "${output_dir}/static.avif")"
 }
 
 probe_stream_field() {
@@ -136,7 +231,7 @@ probe_stream_field() {
     -select_streams "${selector}" \
     -show_entries "stream=${field}" \
     -of default=noprint_wrappers=1:nokey=1 \
-    "${file}"
+    "$(native_path "${file}")" | tr -d '\r'
 }
 
 expect_stream_field() {
@@ -158,19 +253,22 @@ validate_fixture() {
   local frame_count
   local keyframes
   local expected_keyframes
+  local native_file
+
+  native_file="$(native_path "${file}")"
 
   stream_count="$(
     ffprobe \
       -v error \
       -show_entries stream=index \
       -of csv=p=0 \
-      "${file}" | awk 'END { print NR }'
+      "${native_file}" | awk 'END { print NR }'
   )"
   [[ "${stream_count}" == "5" ]] || fail "expected 5 streams, got ${stream_count}"
 
   # Absolute indices make the expected Matroska stream order explicit.
   expect_stream_field "${file}" v:0 index 0
-  expect_stream_field "${file}" v:0 codec_name mpeg4
+  expect_stream_field "${file}" v:0 codec_name av1
   expect_stream_field "${file}" v:0 width 160
   expect_stream_field "${file}" v:0 height 90
   expect_stream_field "${file}" v:0 r_frame_rate 30/1
@@ -196,7 +294,7 @@ validate_fixture() {
       -v error \
       -show_entries format=duration \
       -of default=noprint_wrappers=1:nokey=1 \
-      "${file}"
+      "${native_file}"
   )"
   awk -v duration="${duration}" \
     'BEGIN { exit !(duration >= 7.999 && duration <= 8.001) }' ||
@@ -209,7 +307,7 @@ validate_fixture() {
       -select_streams v:0 \
       -show_entries stream=nb_read_frames \
       -of default=noprint_wrappers=1:nokey=1 \
-      "${file}"
+      "${native_file}" | tr -d '\r'
   )"
   [[ "${frame_count}" == "240" ]] || fail "expected 240 video frames, got ${frame_count}"
 
@@ -219,7 +317,7 @@ validate_fixture() {
       -select_streams v:0 \
       -show_entries packet=pts_time,flags \
       -of csv=p=0 \
-      "${file}" |
+      "${native_file}" |
       awk -F, '$2 ~ /K/ { printf "%.6f\n", $1 }'
   )"
   expected_keyframes="$(cat <<'EOF'
@@ -237,31 +335,68 @@ EOF
     fail "unexpected keyframe timestamps:\n${keyframes}"
 }
 
-first_build="${tmp_dir}/first.mkv"
-second_build="${tmp_dir}/second.mkv"
+validate_visual_fixture() {
+  local file="$1"
+  local expected_frames="$2"
+  local frame_count
+  local native_file
 
-generate_fixture "${first_build}"
-generate_fixture "${second_build}"
-cmp -s "${first_build}" "${second_build}" ||
-  fail "two clean builds are not byte-for-byte identical"
-validate_fixture "${first_build}"
+  native_file="$(native_path "${file}")"
+
+  expect_stream_field "${file}" v:0 codec_name av1
+  expect_stream_field "${file}" v:0 width 160
+  expect_stream_field "${file}" v:0 height 90
+  frame_count="$(
+    ffprobe \
+      -v error \
+      -count_frames \
+      -select_streams v:0 \
+      -show_entries stream=nb_read_frames \
+      -of default=noprint_wrappers=1:nokey=1 \
+      "${native_file}" | tr -d '\r'
+  )"
+  [[ "${frame_count}" == "${expected_frames}" ]] ||
+    fail "${file}: expected ${expected_frames} frames, got ${frame_count}"
+}
+
+first_build="${tmp_dir}/first"
+second_build="${tmp_dir}/second"
+
+generate_fixture_set "${first_build}"
+generate_fixture_set "${second_build}"
+for fixture in "${AV1_FIXTURE_NAMES[@]}"; do
+  cmp -s "${first_build}/${fixture}" "${second_build}/${fixture}" ||
+    fail "two clean builds of ${fixture} are not byte-for-byte identical"
+done
+validate_fixture "${first_build}/${FIXTURE_NAME}"
+for fixture in av1-video.mp4 av1-video.mov av1-video.webm av1-video.ivf av1-video.obu; do
+  validate_visual_fixture "${first_build}/${fixture}" 30
+done
+validate_visual_fixture "${first_build}/static.avif" 1
 
 if [[ "${mode}" == "update" ]]; then
-  cp "${first_build}" "${FIXTURE_PATH}"
+  for fixture in "${AV1_FIXTURE_NAMES[@]}"; do
+    cp "${first_build}/${fixture}" "${SCRIPT_DIR}/${fixture}"
+  done
   (
     cd "${SCRIPT_DIR}"
-    shasum -a 256 "${FIXTURE_NAME}" track-a.srt track-b.srt >"${CHECKSUM_PATH}"
+    sha256sum "${AV1_FIXTURE_NAMES[@]}" track-a.srt track-b.srt >"${CHECKSUM_PATH}"
   )
 else
   [[ -f "${FIXTURE_PATH}" ]] || fail "fixture is missing: ${FIXTURE_PATH}"
   [[ -f "${CHECKSUM_PATH}" ]] || fail "checksum file is missing: ${CHECKSUM_PATH}"
-  cmp -s "${first_build}" "${FIXTURE_PATH}" ||
+  cmp -s "${first_build}/${FIXTURE_NAME}" "${FIXTURE_PATH}" ||
     fail "committed fixture differs from a clean build; run ./generate.sh --update intentionally"
+  for fixture in "${AV1_FIXTURE_NAMES[@]:1}"; do
+    [[ -f "${SCRIPT_DIR}/${fixture}" ]] || fail "fixture is missing: ${fixture}"
+    cmp -s "${first_build}/${fixture}" "${SCRIPT_DIR}/${fixture}" ||
+      fail "committed ${fixture} differs from a clean build; run ./generate.sh --update intentionally"
+  done
 fi
 
 (
   cd "${SCRIPT_DIR}"
-  shasum -a 256 -c SHA256SUMS
+  sha256sum -c SHA256SUMS
 )
 
-printf 'ok: %s is deterministic and structurally valid\n' "${FIXTURE_NAME}"
+printf 'ok: AV1/AVIF fixture set is deterministic and structurally valid\n'

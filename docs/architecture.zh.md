@@ -11,7 +11,7 @@ Rust Player Core
   source abstraction ─── file + HTTP range
   FFmpeg wrappers ────── custom AVIO, probe, demux, decode, seek, audio resample
   playback engine ────── video/audio tick, clock, frame scheduler
-  video decode ───────── VideoToolbox, D3D11VA, MediaCodec, AVCodec, software fallback
+  AV1 decode ─────────── VideoToolbox, D3D11VA/DXVA2, MediaCodec, software fallback
   audio output ───────── CoreAudio, AudioQueue, WASAPI, AAudio, OHAudio, ring buffer
   overlay timeline ───── subtitle + danmaku composition
   renderer core ──────── color state, render graph, tone map, scaler policy
@@ -30,7 +30,7 @@ Rust Player Core
 | 依赖 | 版本 | 作用 |
 |------|------|------|
 | FFmpeg | 8.1.2 | Demux、decode、audio resample、平台硬解 |
-| dav1d | 1.5.1 | 非 Windows 目标的 AV1 软解回退（8-bit 与高位深） |
+| dav1d | 1.5.1 | 所有目标的 AV1 软解回退（8-bit 与高位深） |
 | libass | 0.17.5 | ASS 字幕渲染 |
 | FreeType | 2.14.3 | 字体栅格化（libass 依赖） |
 | HarfBuzz | 14.2.1 | 文本 shaping（libass 依赖） |
@@ -48,13 +48,17 @@ cargo run -p xtask -- deps status
 `erika_ffmpeg_sys` 在构建时通过 bindgen 生成底层绑定。`erika::ffmpeg` 提供安全的 Rust 封装：
 
 - **Demuxer**：持有 `AVFormatContext`，可选使用来自 `MediaSource` 的 Rust 后端自定义 `AVIOContext`。支持流选择、引用计数 packet 和基于时间戳的 seek。
-- **Decoder**：软件，以及 VideoToolbox、D3D11VA、MediaCodec、OpenHarmony AVCodec 硬件后端。硬件帧保留 BT.2020/PQ 元数据，并携带平台原生句柄（Apple 上是 `CVPixelBufferRef`）供渲染器零拷贝导入。
+- **Decoder**：AV1 软件解码，以及 VideoToolbox、D3D11VA/DXVA2、MediaCodec 硬件后端。所有目标都使用源码构建的 dav1d 回退；OpenHarmony 因保留的 AVCodec bridge 只支持 AVC/HEVC 而直接选择 dav1d。硬件帧保留 BT.2020/PQ 元数据，并携带平台原生句柄供渲染器导入。
 - **AudioResampler**：封装 `libswresample`，输出 interleaved f32 PCM（默认 48 kHz stereo）。
 - **SubtitleDecoder**：解码内嵌文本和位图字幕流。
 
 ## 播放引擎
 
 `PlaybackSession` 负责打开媒体、选择轨道、配置解码后端，并产出视频帧和 PCM 音频块。
+
+完成 probe、创建 decoder 之前，session 必须确认存在 AV1 视觉轨。动态 AV1 只接受
+MP4/MOV、Matroska/WebM、IVF 与 raw AV1；AVIF 只承诺单张静态主图。音频、字幕和
+弹幕仅作为附属能力，非 AV1 视觉媒体与纯音频会通过现有错误通道返回明确支持范围。
 
 解码器可用性是 session invariant：只要选中了视频轨，play、seek 和 video-frame pump 入口就必须有活动的视频 decoder。MediaCodec seek reopen 以及 Surface→ByteBuffer/software fallback 等破坏性切换会先记录 decoder unavailable reason；若最终 software decoder 也打开失败，这些入口会返回该明确错误并要求重新 open 媒体，绝不会进入只播音频的假 `Playing` 状态。
 
@@ -126,7 +130,7 @@ Windows 平台的原生渲染器（`renderer/d3d11.rs`）：
 - 分块执行 ArtCNN C4F16/C4F16 DS/C4F32（`renderer/wgpu_artcnn.rs`），用有界 feature texture 和源分辨率 packed DepthToSpace 输出控制显存。既支持原生 luma plane，也支持 Android 已转换的 nonlinear RGB texture，并通过 `rgb + (Y_sr - Y)` 保持色度。GLES 3.0 不尝试 compute，而是明确报告 `Inactive` 和 `native_luma_sampling` 回退。
 - 字幕/弹幕合成、截图，以及可用于无头验证的离屏 render target。即使显示 surface 是 extended-linear，截图也始终离屏渲染到 SDR RGBA8 target，避免把未映射的 scRGB 值当成 SDR 像素输出。
 - 表面句柄模型覆盖 macOS NSView、iOS UIView、Windows HWND、X11/Wayland、Android native window、OpenHarmony `OHNativeWindow`。
-- OpenHarmony 把 AVCodec 的 Surface 输出作为 `OHNativeBuffer` 支撑的 Vulkan 外部图像导入，并用 Vulkan YCbCr sampler 在 GPU 上完成 YUV 转换，解码帧无需 CPU 拷贝即可进入 wgpu 合成器。缺少所需 Vulkan 扩展的设备回退到软解 + CPU 上传，回退过程通过诊断事件上报。
+- OpenHarmony 保留 AVCodec Surface 导入以维持 ABI 兼容，但该 bridge 没有 AV1 路径，所以支持范围内的媒体不会选择它。源码构建的 dav1d 输出通过 CPU upload 进入 wgpu 合成器。
 - Android 提供有界 Vulkan/GLES backend recovery，以及 import、能力、质量降级和 device failure 的结构化日志。其高 headroom 输出是 FP16 **extended-linear scRGB**，不是 HDR10/PQ：renderer 使用 `Rgba16Float`、Vulkan extended-sRGB-linear color space，并在每次 configure/reconfigure 后验证 `ANativeWindow` 的 `ADATASPACE_SCRGB_LINEAR`（`0x18410000`）。Android scRGB 使用 BT.709 primaries，`1.0 = 80 nit`，不会输出 PQ 或 HDR10 static metadata。
 - Extended-linear 只有在显式请求 `ExtendedLinear`、显示器/surface 支持 HDR、使用 Flutter Hybrid Composition 承载 `SurfaceView`、wgpu 后端为 Vulkan、surface 支持 `Rgba16Float`，且 `SCRGB_LINEAR` dataspace 回读成功时才会激活。任一条件缺失都会立即选择正常 SDR surface，并记录稳定的 `0..8` fallback reason；因此 GLES 与 `TextureView` 都是 SDR 路径。
 - API 34+ 上，Android 宿主通过 `Display.registerHdrSdrRatioChangedListener` 观察显示器，并把真实变化经 `erika_presenter_set_output_headroom` 发布给 Erika。wgpu 无需重新 attach surface，就会让后续帧使用更新后的有效内容 headroom，并同步可查询状态。ratio 可用时 `activeHeadroomKnown` 为 true；只有 known 标志或 ratio 确实变化时，`headroomUpdates` 才增长。
@@ -180,10 +184,10 @@ Embedding 模型和 HDR 策略见 `docs/flutter_embedding.md`。
 
 | Platform | Decode | Render | Audio | Status |
 |----------|--------|--------|-------|--------|
-| macOS 11+ | VideoToolbox | Metal | CoreAudio | Available |
-| iOS 13+ | VideoToolbox | Metal | AudioQueue | Available |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | Available |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | Available |
+| macOS 11+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | Available |
+| iOS 13+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | Available |
 | Linux | — | wgpu (planned) | — | Planned |
-| Android 8+ | MediaCodec / software | wgpu Vulkan + GLES fallback | AAudio | Available；SDR 已验证，extended-linear scRGB 等待 API 35 HDR 真机验收 |
-| HarmonyOS API 18+ | AVCodec（H.264/HEVC）/ software | wgpu Vulkan，`OHNativeBuffer` 零拷贝导入 | OHAudio | Available；已在真机验证，CI 构建 OpenHarmony C ABI 但无设备侧运行验证 |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu Vulkan + GLES fallback | AAudio | Available；此 fork 仍需真机验收 |
+| HarmonyOS API 18+ | AV1 dav1d software | wgpu Vulkan | OHAudio | Available；此 fork 仍需真机验收 |

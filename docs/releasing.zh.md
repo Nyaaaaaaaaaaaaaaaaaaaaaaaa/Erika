@@ -2,6 +2,15 @@
 
 > 翻译：[English](releasing.md) · [日本語](releasing.ja.md)
 
+> fork 策略：`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 尚未发布原生、pub.dev、OHPM 或
+> Swift 工件。生态发布 workflow 被限制为仅在 `AimesSoft/Erika` 执行；此 fork 将来可以
+> 使用原生 GitHub Release workflow 发布组织内资产，但不得向上游包渠道或
+> `AimesSoft/ErikaSwift` 写入。
+
+预编译下载默认使用 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika`，可通过
+`ERIKA_PREBUILT_REPOSITORY=owner/repo` 覆盖。fork 资产缺失时必须明确失败，禁止回退到
+上游全格式二进制。
+
 本文说明如何发布预构建 `erika_capi`，让依赖项目无需从源码编译 FFmpeg 和 Erika。
 
 ## 发布产物

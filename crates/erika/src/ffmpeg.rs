@@ -1199,11 +1199,7 @@ impl Decoder {
                     "event": "video_decoder",
                     "stage": "software_decoder_selected",
                     "codec": "av1",
-                    "decoder": if cfg!(target_os = "windows") {
-                        "avcodec_find_decoder"
-                    } else {
-                        "libdav1d"
-                    },
+                    "decoder": "libdav1d",
                 })
                 .to_string(),
             );
@@ -1634,7 +1630,6 @@ impl Decoder {
 }
 
 fn software_decoder(codec_id: sys::AVCodecID) -> (*const sys::AVCodec, &'static str) {
-    #[cfg(not(target_os = "windows"))]
     if codec_id == sys::AVCodecID_AV_CODEC_ID_AV1 {
         return (
             unsafe { sys::avcodec_find_decoder_by_name(c"libdav1d".as_ptr()) },
@@ -1661,19 +1656,7 @@ fn videotoolbox_decoder(codec_id: sys::AVCodecID) -> (*const sys::AVCodec, &'sta
 }
 
 fn mediacodec_decoder(codec_id: sys::AVCodecID) -> *const sys::AVCodec {
-    let name = if codec_id == sys::AVCodecID_AV_CODEC_ID_H264 {
-        b"h264_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_HEVC {
-        b"hevc_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_MPEG2VIDEO {
-        b"mpeg2_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_MPEG4 {
-        b"mpeg4_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_VP8 {
-        b"vp8_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_VP9 {
-        b"vp9_mediacodec\0".as_slice()
-    } else if codec_id == sys::AVCodecID_AV_CODEC_ID_AV1 {
+    let name = if codec_id == sys::AVCodecID_AV_CODEC_ID_AV1 {
         b"av1_mediacodec\0".as_slice()
     } else {
         return ptr::null();
@@ -4585,9 +4568,6 @@ mod tests {
     #[test]
     fn software_uses_available_ffmpeg_av1_decoder() {
         let (codec, operation) = software_decoder(sys::AVCodecID_AV_CODEC_ID_AV1);
-        #[cfg(target_os = "windows")]
-        assert_eq!(operation, "avcodec_find_decoder");
-        #[cfg(not(target_os = "windows"))]
         assert_eq!(operation, "avcodec_find_decoder_by_name(libdav1d)");
         assert!(!codec.is_null());
     }
@@ -4606,7 +4586,7 @@ mod tests {
             .find(|track| track.kind == TrackKind::Video)
             .unwrap();
 
-        assert_eq!(video.codec.as_deref(), Some("mpeg4"));
+        assert_eq!(video.codec.as_deref(), Some("av1"));
         assert_eq!((video.width, video.height), (160, 90));
         assert_eq!(video.bit_rate, None);
         assert_eq!(video.frame_rate, FrameRate::new(30, 1));

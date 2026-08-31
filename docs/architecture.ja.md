@@ -11,7 +11,7 @@ Rust Player Core
   source abstraction ─── file + HTTP range
   FFmpeg wrappers ────── custom AVIO, probe, demux, decode, seek, audio resample
   playback engine ────── video/audio tick, clock, frame scheduler
-  video decode ───────── VideoToolbox, D3D11VA, MediaCodec, AVCodec, software fallback
+  AV1 decode ─────────── VideoToolbox, D3D11VA/DXVA2, MediaCodec, software fallback
   audio output ───────── CoreAudio, AudioQueue, WASAPI, AAudio, OHAudio, ring buffer
   overlay timeline ───── subtitle + danmaku composition
   renderer core ──────── color state, render graph, tone map, scaler policy
@@ -30,7 +30,7 @@ Rust Player Core
 | 依存関係 | バージョン | 目的 |
 |----------|-----------|------|
 | FFmpeg | 8.1.2 | Demux、decode、audio resample、プラットフォーム HW decode |
-| dav1d | 1.5.1 | 非 Windows ターゲットの AV1 software fallback（8-bit / high bit depth） |
+| dav1d | 1.5.1 | 全ターゲットの AV1 software fallback（8-bit / high bit depth） |
 | libass | 0.17.5 | ASS subtitle 描画 |
 | FreeType | 2.14.3 | フォントラスタライズ（libass 依存） |
 | HarfBuzz | 14.2.1 | テキストシェーピング（libass 依存） |
@@ -48,13 +48,18 @@ cargo run -p xtask -- deps status
 `erika_ffmpeg_sys` は build 時に bindgen で低レベルバインディングを生成します。`erika::ffmpeg` は安全な Rust ラッパーを提供します。
 
 - **Demuxer**: `AVFormatContext` を保持し、`MediaSource` 由来の Rust-backed custom `AVIOContext` を使うこともできます。stream selection、reference-counted packets、timestamp-based seek をサポートします。
-- **Decoder**: software に加えて VideoToolbox、D3D11VA、MediaCodec、OpenHarmony AVCodec の hardware backend を持ちます。hardware frames は BT.2020/PQ metadata を保持し、platform native handle（Apple では `CVPixelBufferRef`）を通じて renderer に zero-copy で渡せます。
+- **Decoder**: AV1 software decode と VideoToolbox、D3D11VA/DXVA2、MediaCodec hardware backend を持ちます。全ターゲットで source-built dav1d に fallback し、OpenHarmony は保持された AVCodec bridge が AVC/HEVC のみ対応するため dav1d を直接選択します。
 - **AudioResampler**: `libswresample` を包み、interleaved f32 PCM（既定 48 kHz stereo）へ変換します。
 - **SubtitleDecoder**: 埋め込みテキスト字幕と bitmap 字幕ストリームをデコードします。
 
 ## 再生エンジン
 
 `PlaybackSession` は media を開き、track を選び、decode backend を設定し、video frame と PCM audio block を生成します。
+
+probe 完了後、decoder 作成前に AV1 visual track の存在を必須にします。dynamic AV1 は
+MP4/MOV、Matroska/WebM、IVF、raw AV1、AVIF は単一 static primary image のみです。
+audio/subtitle/danmaku は付随機能で、non-AV1 visual と audio-only media は既存 error
+channel から明示的な supported scope を返します。
 
 Decoder availability は session invariant です。video track が選択されている場合、play / seek / video-frame pump の各入口には active video decoder が必要です。MediaCodec seek reopen や Surface→ByteBuffer/software fallback のような破壊的 transition では、先に decoder-unavailable reason を記録します。最終 software decoder の open まで失敗した場合、各入口はその明示的 error を返して media の reopen を要求し、audio-only の偽 `Playing` state には入りません。
 
@@ -126,7 +131,7 @@ Windows のネイティブ renderer（`renderer/d3d11.rs`）：
 - bounded feature texture と source-sized packed DepthToSpace output を使う tiled ArtCNN C4F16/C4F16 DS/C4F32 compute（`renderer/wgpu_artcnn.rs`）。native luma と Android の converted nonlinear RGB の両方を扱い、`rgb + (Y_sr - Y)` で chroma を保持します。GLES 3.0 は compute を試さず、`Inactive` と `native_luma_sampling` fallback を明示します。
 - subtitle/danmaku composite、frame capture、headless testing 用 offscreen target。display surface が extended-linear の場合も screenshot は常に SDR RGBA8 target へ offscreen render し、未マップの scRGB 値を SDR pixel として返しません。
 - surface handle model は macOS NSView、iOS UIView、Windows HWND、X11/Wayland、Android native window、OpenHarmony `OHNativeWindow` をカバーします。
-- OpenHarmony では AVCodec の Surface 出力を `OHNativeBuffer` 由来の Vulkan external image として import し、Vulkan YCbCr sampler で YUV 変換を GPU 上で行うため、decode したフレームは CPU コピーなしで wgpu compositor に到達します。必要な Vulkan extension がない端末では software decode と CPU upload に fallback し、その経緯は diagnostics event から確認できます。
+- OpenHarmony の AVCodec Surface import は ABI compatibility のため保持しますが、その bridge に AV1 path がないため supported media では選択しません。source-built dav1d の出力は CPU upload で wgpu compositor に渡します。
 - Android は bounded Vulkan/GLES backend recovery と import/capability/quality/device-failure diagnostics を備えます。high-headroom output は FP16 **extended-linear scRGB** であり HDR10/PQ ではありません。renderer は `Rgba16Float`、Vulkan extended-sRGB-linear color space を使い、configure/reconfigure ごとに `ANativeWindow` の `ADATASPACE_SCRGB_LINEAR`（`0x18410000`）を検証します。Android scRGB は BT.709 primaries、`1.0 = 80 nit` で、PQ や HDR10 static metadata は出力しません。
 - Extended-linear が active になる条件は、`ExtendedLinear` の明示要求、HDR 対応 display/surface、Flutter Hybrid Composition の `SurfaceView`、Vulkan wgpu backend、surface の `Rgba16Float` 対応、`SCRGB_LINEAR` dataspace readback 成功です。どれかが欠けると通常の SDR surface を直ちに選び、安定 ABI の fallback reason `0..8` を記録します。そのため GLES と `TextureView` は SDR path です。
 - API 34+ では Android host が `Display.registerHdrSdrRatioChangedListener` で display を監視し、実際の変化を `erika_presenter_set_output_headroom` で Erika に publish します。wgpu は surface を reattach せず、後続 frame の effective content headroom と queryable output status を更新します。ratio が available なら `activeHeadroomKnown` は true で、known flag または ratio が実際に変わった場合だけ `headroomUpdates` が増えます。
@@ -180,10 +185,10 @@ embedding model と HDR strategy は `docs/flutter_embedding.md` を参照して
 
 | Platform | Decode | Render | Audio | Status |
 |----------|--------|--------|-------|--------|
-| macOS 11+ | VideoToolbox | Metal | CoreAudio | Available |
-| iOS 13+ | VideoToolbox | Metal | AudioQueue | Available |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | Available |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | Available |
+| macOS 11+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | Available |
+| iOS 13+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | Available |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | Available |
 | Linux | — | wgpu (planned) | — | Planned |
-| Android 8+ | MediaCodec / software | wgpu Vulkan + GLES fallback | AAudio | Available。SDR は検証済み、extended-linear scRGB は API 35 HDR 実機 acceptance 待ち |
-| HarmonyOS API 18+ | AVCodec（H.264/HEVC）/ software | wgpu Vulkan、`OHNativeBuffer` zero-copy import | OHAudio | Available。実機で検証済み、CI は OpenHarmony C ABI をビルドするがデバイス側の実行検証はなし |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu Vulkan + GLES fallback | AAudio | Available。この fork は実機 acceptance 未実施 |
+| HarmonyOS API 18+ | AV1 dav1d software | wgpu Vulkan | OHAudio | Available。この fork は実機 acceptance 未実施 |

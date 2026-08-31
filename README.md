@@ -13,10 +13,22 @@
 
 宿主应用只需提供一个渲染表面并发送播放命令——解码、时序同步、音视频渲染、字幕、弹幕、音频输出均由 Erika 内部完成，不经过宿主的渲染管线。
 
+## 此 fork 的媒体边界
+
+这是 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 的 AV1 / AVIF 专用分支，保留 Erika
+现有 crate、C ABI、Flutter/ArkTS 包名和跨平台渲染接口，但只接受下列视觉媒体：
+
+- AV1 动态视频：MP4/MOV、Matroska/MKV、WebM、IVF 和 raw AV1/OBU；
+- AVIF：单张静态主图，首帧呈现后保留在渲染表面；animated AVIF 和 image sequence 不作兼容承诺；
+- 音频、内嵌/外挂字幕和弹幕只作为 AV1 播放的附属能力，不代表支持纯音频文件或其他视觉 codec。
+
+H.264、HEVC/HEIC、VP8/VP9、MPEG、JPEG、PNG、WebP 和纯音频输入会通过
+现有错误通道被明确拒绝。
+
 ## 特性
 
-- **硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA (Windows)、MediaCodec (Android)、AVCodec (HarmonyOS)，互操作不可用时明确回退软解
-- **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan、HarmonyOS AVCodec Surface → OHNativeBuffer/Vulkan；无法导入时明确回退 CPU upload
+- **AV1 硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)，不可用时明确回退 AV1 软解；HarmonyOS 直接使用 dav1d
+- **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan；软件帧走明确的 CPU upload
 - **HDR/EDR 输出** — Apple EDR、Windows HDR10，以及 Android FP16 extended-linear scRGB 协商与明确 SDR 回退
 - **原生 Metal 渲染器** — YCbCr 采样、色彩空间转换、tone mapping、字幕/弹幕合成，一次 render pass 完成 (macOS/iOS/tvOS)
 - **原生 Direct3D 11 渲染器** — Windows: D3D11VA 零拷贝纹理互操作、YCbCr 采样、HDR10 输出、字幕/弹幕 overlay 合成
@@ -72,43 +84,25 @@ ErikaVideoView(player: player)
 
 ### Flutter package
 
-`erika_flutter` 0.1.7 is published on [pub.dev](https://pub.dev/packages/erika_flutter)
-for macOS, iOS, tvOS, Windows, Android, and HarmonyOS/OpenHarmony. Add it to a
-Flutter app with:
+此 fork 尚未发布 pub.dev 或预编译二进制。请从本仓库源码依赖并设置
+`ERIKA_FORCE_SOURCE_BUILD=1`；包脚本的预编译默认仓库是
+`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika`，也可通过 `ERIKA_PREBUILT_REPOSITORY`
+覆盖。组织发布对应资产之前，预编译模式会明确失败，不会回退下载上游全格式二进制。
 
-```sh
-flutter pub add erika_flutter
-```
-
-The package downloads the matching verified native runtime during the platform
-build. Android downloads only the selected ABI archive; Linux and Web are not
-published targets yet.
+上游 pub.dev 包不代表本 fork 的 AV1/AVIF 支持边界。
 
 ### OpenHarmony package
 
-The native ArkTS package `erika` 0.1.7 is published on
-[OHPM](https://ohpm.openharmony.cn/#/cn/detail/erika) for OpenHarmony arm64
-applications (API 18+). Install it with:
-
-```sh
-ohpm install erika
-```
+此 fork 尚未发布 OHPM 包；请从 `packages/erika_ohos` 源码集成。上游同名
+OHPM 包不代表本 fork 的 AV1/AVIF 支持边界。
 
 See the [OpenHarmony package guide](packages/erika_ohos/README.md) for the
 `ErikaPlayer` API and `XComponent` surface setup.
 
 ### Swift package
 
-原生 macOS、iOS 和 tvOS 应用可通过 Swift Package Manager 使用
-[`ErikaSwift`](https://github.com/AimesSoft/ErikaSwift) 0.1.7。在 Xcode 的
-**Add Package Dependencies** 中输入：
-
-```text
-https://github.com/AimesSoft/ErikaSwift
-```
-
-SwiftPM 会自动下载对应的 Apple XCFramework，不需要安装 Rust、FFmpeg、
-CocoaPods 或 Flutter。
+此 fork 尚未发布 Swift 包，也不会向 `AimesSoft/ErikaSwift` 写入。上游
+`ErikaSwift` 的预编译 XCFramework 是全格式版本，不属于此 fork 的分发渠道。
 
 ## C ABI 接口族
 
@@ -125,13 +119,13 @@ Erika 提供两组 C ABI 入口，适配不同嵌入场景：
 
 | 平台 | 解码 | 渲染 | 音频 | 状态 |
 |------|------|------|------|------|
-| macOS 14+ | VideoToolbox | Metal | CoreAudio | **可用** |
-| iOS 16+ | VideoToolbox | Metal | AudioQueue | **可用** |
-| tvOS 13+ (Apple TV) | VideoToolbox | Metal | AudioQueue | **可用** |
-| Windows 10+ | D3D11VA | Direct3D 11 | WASAPI | **可用** |
+| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **可用** |
+| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **可用** |
+| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **可用** |
+| Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **可用** |
 | Linux | — | wgpu (planned) | — | 规划中 |
-| Android 8+ | MediaCodec / software | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
-| HarmonyOS API 18+ | AVCodec（H.264/HEVC）/ 软解 | wgpu (Vulkan) + `OHNativeBuffer` 零拷贝导入 | OHAudio | **可用** |
+| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
+| HarmonyOS API 18+ | AV1 dav1d 软件解码 | wgpu (Vulkan) | OHAudio | **可用** |
 
 ## 仓库结构
 
@@ -151,7 +145,7 @@ docs/                     架构与嵌入文档
 - [架构总览](docs/architecture.zh.md) — 引擎设计、渲染后端、平台支持
 - [C ABI 参考手册](docs/capi_reference.zh.md) — 全部导出函数、状态码、所有权与线程约定
 - [原生接入指南](docs/integration.zh.md) — C/C++/Win32/Swift 等非 Flutter 宿主的端到端嵌入
-- [Swift SDK](https://github.com/AimesSoft/ErikaSwift) — macOS、iOS、tvOS 的 SwiftPM 包和原生视图
+- Swift SDK — 此 fork 尚未发布；不会向上游 `AimesSoft/ErikaSwift` 写入
 - [构建与依赖指南](docs/building.zh.md) — xtask、native 依赖、交叉编译
 - [Flutter 嵌入](docs/flutter_embedding.zh.md) ・ [弹幕架构](docs/danmaku_architecture.md)
 - [平台能力矩阵](docs/platform_matrix.zh.md) — 区分可编译、CI 覆盖、真机验收与预编译发布

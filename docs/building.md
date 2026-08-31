@@ -3,7 +3,7 @@
 > Translations: [中文](building.zh.md) · [日本語](building.ja.md)
 
 Erika is a Rust workspace that links a set of **statically built native
-dependencies** (FFmpeg, dav1d as the non-Windows AV1 fallback, and optionally
+dependencies** (FFmpeg, dav1d as the AV1 fallback on every target, and optionally
 the libass subtitle stack). Those native libraries are not vendored — you build them once with the `xtask` orchestrator,
 which stages them under `third_party/dist/`, and the Rust crates link against
 that staging directory.
@@ -222,11 +222,14 @@ the cdylib directly together with the matching NDK `libc++_shared.so`.
 
 The native build is split into profiles so the license boundary is explicit:
 
-- **`lgpl`** (default) — FFmpeg configured `--disable-gpl --enable-version3`,
-  static, no network, file protocol only, a curated demuxer/decoder/parser set,
-  zlib enabled, plus VideoToolbox (Apple), D3D11VA/DXVA2 (Windows), or
-  JNI/MediaCodec plus source-built dav1d AV1 software fallback (Android and
-  Apple targets).
+- **`lgpl`** (default) — FFmpeg configured `--disable-everything`,
+  `--disable-gpl --enable-version3`, static, no network, and file protocol only.
+  Its visual decoder/parser allowlist contains AV1 only; demuxers cover
+  MP4/MOV/AVIF, Matroska/WebM, IVF, raw AV1, and ASS/SRT/WebVTT. Audio and
+  subtitle decoders are ancillary to AV1 playback. AV1 hardware is enabled only
+  through VideoToolbox (Apple), D3D11VA/DXVA2 (Windows), and MediaCodec
+  (Android); dav1d is the software fallback on every target, including Windows
+  and OpenHarmony.
 - **`gpl-full`** — the same set with `--enable-gpl`. Use only if you accept GPL
   terms for the resulting binary.
 
@@ -285,16 +288,15 @@ cargo test --workspace               # unit + integration tests
 - Android: per-ABI `liberika_capi.so` plus the matching NDK
   `libc++_shared.so`; `liberika_capi.a` is also available for native embedders.
 
-Android FFmpeg keeps the H.264, HEVC, MPEG-2, MPEG-4, VP8, VP9, and AV1
-MediaCodec decoders enabled. The intended hardware path asks MediaCodec for
+Android FFmpeg keeps only the AV1 MediaCodec visual decoder enabled. The
+intended hardware path asks MediaCodec for
 software-readable YUV frames and reuses the shared wgpu upload/composition
 pipeline, preserving subtitles, danmaku, and screenshots. This is hardware
 decode with a CPU upload, not a zero-copy Surface path; metrics must report it
 accordingly. If AV1 MediaCodec cannot open or fails while decoding, the software
 path explicitly selects FFmpeg's `libdav1d` decoder. `xtask` builds dav1d 1.5.1
-from source for every Android ABI and the Apple targets, with both 8-bit and
-high-bit-depth support; the 32-bit Android x86 slice disables assembly to
-preserve PIC safety.
+from source for every target, with both 8-bit and high-bit-depth
+support; the 32-bit Android x86 slice disables assembly to preserve PIC safety.
 
 ### Verify Android output negotiation
 

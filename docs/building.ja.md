@@ -2,7 +2,7 @@
 
 > 翻訳：[English](building.md) · [中文](building.zh.md)
 
-Erika は一連の**静的ビルドされたネイティブ依存**（FFmpeg、非 Windows ターゲットの dav1d AV1
+Erika は一連の**静的ビルドされたネイティブ依存**（FFmpeg、全ターゲットの dav1d AV1
 ソフトウェアフォールバック、オプションの libass 字幕スタック）をリンクする Rust workspace です。これらのネイティブライブラリは vendoring
 されていません——`xtask` オーケストレータで一度ビルドすると `third_party/dist/` 配下に
 配置され、Rust crate がそのステージングディレクトリをリンクします。
@@ -160,9 +160,13 @@ cargo build -p erika_capi --release --target aarch64-pc-windows-msvc
 
 ネイティブビルドはライセンス境界を明示するため profile で分かれています：
 
-- **`lgpl`**（既定）—— FFmpeg を `--disable-gpl --enable-version3`、静的、ネットワーク
-  なし、file プロトコルのみ、厳選した demuxer/decoder/parser セット、zlib 有効、加えて
-  VideoToolbox（Apple）、D3D11VA/DXVA2（Windows）、または JNI/MediaCodec + ソースビルドの dav1d AV1 フォールバック（Android）で構成。
+- **`lgpl`**（既定）—— FFmpeg をまず `--disable-everything` にし、
+  `--disable-gpl --enable-version3`、静的、network 無効、file protocol のみを有効化。
+  visual decoder/parser allowlist は AV1 のみで、demuxer は MP4/MOV/AVIF、
+  Matroska/WebM、IVF、raw AV1、ASS/SRT/WebVTT に限定します。audio/subtitle decoder
+  は AV1 playback の付随機能です。AV1 hardware は VideoToolbox（Apple）、
+  D3D11VA/DXVA2（Windows）、MediaCodec（Android）のみで、Windows と
+  OpenHarmony を含む全ターゲットで dav1d software fallback を構築します。
 - **`gpl-full`** —— 同じセットに `--enable-gpl`。成果物の GPL 条項を受け入れる場合のみ。
 
 Rust workspace 自体は MPL-2.0（[`LICENSE`](../LICENSE)）。`xtask` と `cargo build` で
@@ -218,11 +222,11 @@ cargo test --workspace               # ユニット + 統合テスト
 - Android：ABI ごとの `liberika_capi.so` と対応する NDK
   `libc++_shared.so`。ネイティブ埋め込み向けの `liberika_capi.a` も生成されます。
 
-Android の MediaCodec パスは H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9、AV1 を有効にし、
+Android の visual MediaCodec path は AV1 のみを有効にし、
 読み取り可能な YUV を共有 wgpu 合成パイプラインへ渡します。ハードウェアデコードですが
 CPU upload を伴い、Surface ゼロコピーではありません。AV1 MediaCodec が開けない、または
 デコードに失敗した場合、ソフトウェアパスは FFmpeg の `libdav1d` decoder を明示的に選択します。
-`xtask` は全 4 Android ABI 向けに dav1d 1.5.1 をソースからビルドし、8-bit と高ビット深度を
+`xtask` は全 target 向けに dav1d 1.5.1 をソースからビルドし、8-bit と高ビット深度を
 有効にします。32-bit x86 では PIC 安全性のためアセンブリを無効にします。
 
 ### Android output negotiation の検証
