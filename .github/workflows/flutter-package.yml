@@ -110,7 +110,7 @@ jobs:
         include:
           - name: iOS simulator
             platform: ios
-            build: flutter build ios --simulator --debug --no-codesign
+            build: flutter build ios --simulator --debug --no-codesign --verbose
           - name: macOS
             platform: macos
             build: flutter build macos --debug
@@ -127,8 +127,9 @@ jobs:
         run: brew install nasm meson ninja pkg-config
       - uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/erika-prebuilt-cache
-          key: erika-flutter-${{ matrix.platform }}-${{ hashFiles('packages/erika_flutter/native_artifacts.properties') }}
+          path: third_party
+          key: erika-flutter-${{ matrix.platform }}-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          save-always: true
       - name: Create isolated consumer
         shell: bash
         env:
