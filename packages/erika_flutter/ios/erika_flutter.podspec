@@ -188,10 +188,17 @@ if [ ! -f "$OUTPUT_LIB" ]; then
   echo "error: Erika C ABI static library not found: $OUTPUT_LIB" >&2
   exit 1
 fi
-case "${PLATFORM_NAME:-iphoneos}" in
-  iphoneos) xcrun lipo -verify_arch arm64 "$OUTPUT_LIB" ;;
-  iphonesimulator) xcrun lipo -verify_arch arm64 x86_64 "$OUTPUT_LIB" ;;
+OUTPUT_ARCHS="$(xcrun lipo -archs "$OUTPUT_LIB")"
+case " $OUTPUT_ARCHS " in
+  *" arm64 "*) ;;
+  *) echo "error: Erika iOS runtime is missing arm64: $OUTPUT_ARCHS" >&2; exit 1 ;;
 esac
+if [ "${PLATFORM_NAME:-iphoneos}" = "iphonesimulator" ]; then
+  case " $OUTPUT_ARCHS " in
+    *" x86_64 "*) ;;
+    *) echo "error: Erika iOS simulator runtime is missing x86_64: $OUTPUT_ARCHS" >&2; exit 1 ;;
+  esac
+fi
 if [ -f "$OBJROOT/XCBuildData/build.db" ]; then
   ln -fs "$OBJROOT/XCBuildData/build.db" "$BUILT_PRODUCTS_DIR/erika_capi_phony"
 fi

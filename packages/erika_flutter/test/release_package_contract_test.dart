@@ -115,9 +115,10 @@ void main() {
       expect(podspec, contains('LIPO_INPUTS'), reason: path);
       expect(
         podspec,
-        contains('lipo -verify_arch arm64 x86_64'),
+        contains('xcrun lipo -archs'),
         reason: path,
       );
+      expect(podspec, contains('missing x86_64'), reason: path);
       expect(
         podspec,
         isNot(contains(r'$(BUILT_PRODUCTS_DIR)/liberika_capi.a')),
