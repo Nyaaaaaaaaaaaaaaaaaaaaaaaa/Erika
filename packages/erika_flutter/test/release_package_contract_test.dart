@@ -109,6 +109,7 @@ void main() {
       );
       expect(podspec, contains('s.pod_target_xcconfig'), reason: path);
       expect(podspec, contains('s.user_target_xcconfig'), reason: path);
+      expect(podspec, contains('s.static_framework = true'), reason: path);
       expect(podspec, contains('s.vendored_libraries'), reason: path);
       expect(podspec, contains('s.preserve_paths'), reason: path);
       expect(

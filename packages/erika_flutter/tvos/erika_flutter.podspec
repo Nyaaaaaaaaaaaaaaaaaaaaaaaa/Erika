@@ -65,6 +65,7 @@ Flutter tvOS AV1/static AVIF plugin that hosts a CAMetalLayer and drives Erika t
   s.author           = { 'AimesSoft' => 'dev@aimesoft.com' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
+  s.static_framework = true
   s.vendored_libraries = 'native/liberika_capi.a'
   s.preserve_paths   = 'native/liberika_capi.a'
   # Flutter.framework is supplied by the flutter-tvos host app.
