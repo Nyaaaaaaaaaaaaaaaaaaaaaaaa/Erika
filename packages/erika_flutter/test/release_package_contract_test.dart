@@ -95,4 +95,25 @@ void main() {
       expect(artifacts, contains('$property='), reason: property);
     }
   });
+
+  test('Apple static runtimes are linked into the consumer target', () {
+    for (final path in <String>[
+      'ios/erika_flutter.podspec',
+      'tvos/erika_flutter.podspec',
+    ]) {
+      final podspec = File(path).readAsStringSync();
+      expect(
+        podspec,
+        contains(r'$(BUILT_PRODUCTS_DIR)/liberika_capi.a'),
+        reason: path,
+      );
+      expect(podspec, contains('s.pod_target_xcconfig'), reason: path);
+      expect(podspec, contains('s.user_target_xcconfig'), reason: path);
+      expect(
+        podspec,
+        isNot(contains(r'$(PODS_TARGET_SRCROOT)/native/liberika_capi.a')),
+        reason: path,
+      );
+    }
+  });
 }

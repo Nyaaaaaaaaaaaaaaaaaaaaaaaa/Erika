@@ -30,9 +30,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -62,12 +59,26 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      ANDROID_NDK_VERSION: "29.0.14206865"
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: android-actions/setup-android@v3
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - name: Install Android NDK and native build tools
+        shell: bash
+        run: |
+          sdkmanager "ndk;$ANDROID_NDK_VERSION"
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake make ninja-build pkg-config python3-venv
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
         with:
           path: ~/.gradle/caches/erika
