@@ -12,8 +12,6 @@ members = [
   "examples/playback_tick",
   "examples/player_tick",
   "examples/coreaudio_smoke",
-  "examples/danmaku_sync_smoke",
-  "examples/danmaku_perf_lab",
   "examples/metal_presenter_check",
   "examples/ffmpeg_videotoolbox",
   "examples/metal_import_videotoolbox",
@@ -39,17 +37,12 @@ version = "0.1.7"
 
 [workspace.dependencies]
 ab_glyph = "0.2.32"
-aho-corasick = "1.1.4"
 anyhow = "1.0.104"
 sha2 = "0.10.9"
 bitflags = "2.10.0"
 bindgen = "0.72.1"
 cc = "1.2.47"
-chardetng = "0.1"
 crossbeam-channel = "0.5.15"
-encoding_rs = "0.8"
-fontdb = "0.23.0"
-regex = "1.12.3"
 rustc-hash = "2.1.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -75,6 +68,7 @@ debug = 2
 [profile.release]
 codegen-units = 1
 lto = "thin"
+strip = "symbols"
 
 [patch.crates-io]
 # wgpu-hal 29 does not yet route raw-window-handle's OhosNdk variant through

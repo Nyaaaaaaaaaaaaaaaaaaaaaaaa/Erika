@@ -100,7 +100,7 @@ jobs:
           key: native-v2-macos-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
       - name: Build native dependencies
         run: |
-          cargo run --locked -p xtask -- deps build --all \
+          cargo run --locked -p xtask -- deps build \
             --profile "$PROFILE" --target "${{ matrix.target }}"
       - name: Build C API library
         run: >-
@@ -148,14 +148,14 @@ jobs:
           key: native-v2-ios-device-aarch64-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
       - name: Build iOS native dependencies
         run: >-
-          cargo run --locked -p xtask -- deps build --all
+          cargo run --locked -p xtask -- deps build
           --profile "$PROFILE" --target aarch64-apple-ios
       - name: Compile iOS static library
         run: |
           ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="aarch64-apple-ios" \
           cargo rustc --locked -p erika_capi --lib --release \
               --target aarch64-apple-ios \
-              --no-default-features --features libass --crate-type staticlib
+              --no-default-features --crate-type staticlib
 
   tvos:
     name: tvOS simulator staticlib
@@ -177,7 +177,7 @@ jobs:
           key: native-v2-tvos-simulator-aarch64-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
       - name: Build tvOS native dependencies
         run: >-
-          cargo run --locked -p xtask -- deps build --all
+          cargo run --locked -p xtask -- deps build
           --profile "$PROFILE" --target aarch64-apple-tvos-sim
       - name: Compile tvOS static library
         run: |
@@ -188,7 +188,7 @@ jobs:
           cargo +nightly rustc -Z build-std=std,panic_abort --locked \
               -p erika_capi --lib --release \
               --target aarch64-apple-tvos-sim \
-              --no-default-features --features libass --crate-type staticlib
+              --no-default-features --crate-type staticlib
 
   windows:
     name: Windows ${{ matrix.arch }} build
@@ -271,7 +271,7 @@ jobs:
       - name: Build native dependencies
         shell: bash
         run: >-
-          cargo run --locked -p xtask -- deps build --all
+          cargo run --locked -p xtask -- deps build
           --profile "$PROFILE" --target "${{ matrix.target }}"
       - name: Build C API
         shell: bash

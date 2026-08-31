@@ -1,5 +1,8 @@
 # Erika C ABI Reference
 
+> **AV1/AVIF build:** subtitle and danmaku implementations are removed. Their
+> legacy symbols remain only for binary compatibility and return `PlayerError`.
+
 > Translations: [中文](capi_reference.zh.md) · [日本語](capi_reference.ja.md)
 
 This document describes the stable C ABI exported by `erika_capi`, declared in

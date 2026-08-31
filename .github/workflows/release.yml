@@ -10,7 +10,7 @@ name: Release
 # iOS/tvOS erika_capi.xcframework bundles / Android ABI archives /
 # OpenHarmony shared libraries,
 # plus erika.h, LICENSE (MPL-2.0), and THIRD_PARTY_NOTICES.md. Native deps
-# (FFmpeg/libass/...) are statically linked via the `lgpl` profile.
+# (FFmpeg/dav1d/zlib) are statically linked via the `lgpl` profile.
 #
 # Windows uses MSYS2 + MSVC + LLVM/libclang. Android uses NDK LLVM at API 26;
 # xtask supports both Linux-hosted CI and Windows-hosted Git Bash builds.
@@ -63,7 +63,7 @@ jobs:
           key: native-v2-macos-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
       - name: Build native deps + erika_capi
         run: |
-          cargo run -p xtask -- deps build --all --profile "$PROFILE" --target "${{ matrix.target }}"
+          cargo run -p xtask -- deps build --profile "$PROFILE" --target "${{ matrix.target }}"
           ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="${{ matrix.target }}" \
             cargo build -p erika_capi --release --target "${{ matrix.target }}"
       - name: Stage architecture libraries
@@ -151,10 +151,10 @@ jobs:
             BINDGEN_KEY="${T//-/_}"
             export SDKROOT
             export "BINDGEN_EXTRA_CLANG_ARGS_${BINDGEN_KEY}=--target=${CLANG_TARGET} -isysroot ${SDKROOT}"
-            cargo run -p xtask -- deps build --all --profile "$PROFILE" --target "$T"
+            cargo run -p xtask -- deps build --profile "$PROFILE" --target "$T"
             ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="$T" \
             cargo rustc -p erika_capi --lib --release --target "$T" \
-                --no-default-features --features libass --crate-type staticlib
+                --no-default-features --crate-type staticlib
           done
       - name: Assemble XCFramework
         run: |
@@ -211,12 +211,12 @@ jobs:
             BINDGEN_KEY="${T//-/_}"
             export SDKROOT
             export "BINDGEN_EXTRA_CLANG_ARGS_${BINDGEN_KEY}=--target=${CLANG_TARGET} -isysroot ${SDKROOT}"
-            cargo run --locked -p xtask -- deps build --all \
+            cargo run --locked -p xtask -- deps build \
               --profile "$PROFILE" --target "$T"
             ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="$T" \
               cargo +nightly rustc -Z build-std=std,panic_abort --locked \
                 -p erika_capi --lib --release --target "$T" \
-                --no-default-features --features libass --crate-type staticlib
+                --no-default-features --crate-type staticlib
           done
       - name: Assemble XCFramework
         run: |
@@ -321,7 +321,7 @@ jobs:
       - name: Build native deps + erika_capi
         shell: bash
         run: |
-          cargo run -p xtask -- deps build --all --profile "$PROFILE" --target "${{ matrix.target }}"
+          cargo run -p xtask -- deps build --profile "$PROFILE" --target "${{ matrix.target }}"
           ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="${{ matrix.target }}" \
             cargo build -p erika_capi --release --target "${{ matrix.target }}"
       - name: Package
@@ -385,10 +385,10 @@ jobs:
             export "CC_${CC_KEY}=$CC" "CXX_${CC_KEY}=$CXX" "AR_${CC_KEY}=$AR"
             export "BINDGEN_EXTRA_CLANG_ARGS_${CC_KEY}=--target=${CLANG_T}${ANDROID_API_LEVEL} --sysroot=$PREBUILT/sysroot"
             export "CFLAGS_${CC_KEY}=-fPIC" "CXXFLAGS_${CC_KEY}=-fPIC"
-            cargo run -p xtask -- deps build --all --profile "$PROFILE" --target "$T"
+            cargo run -p xtask -- deps build --profile "$PROFILE" --target "$T"
             ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="$T" \
               cargo build -p erika_capi --release --target "$T" \
-                --no-default-features --features libass,wgpu
+                --no-default-features --features wgpu
             mkdir -p "out/android/$ABI"
             cp "target/$T/release/liberika_capi.a" "out/android/$ABI/liberika_capi.a"
             cp "target/$T/release/liberika_capi.so" "out/android/$ABI/liberika_capi.so"

@@ -11,7 +11,7 @@
 > そして [NipaPlay](https://github.com/AimesSoft/NipaPlay-Reload) は『ひぐらしのなく頃に』の古手梨花の口癖「にぱー☆」から——コミュニティではみんな「梨花」と呼んでいます。
 > 一方は表舞台のプレイヤー、もう一方は舞台裏のエンジン。同じ世界から生まれた、表裏一体の存在です。
 
-ホストアプリケーションはレンダリングサーフェスの提供と再生コマンドの送信のみを行い、デコード、タイミング同期、映像レンダリング、字幕、弾幕、音声出力はすべて Erika 内部で完結します。
+ホストアプリケーションはレンダリングサーフェスの提供と再生コマンドの送信のみを行い、デコード、タイミング同期、映像レンダリング、音声出力はすべて Erika 内部で完結します。
 
 ## この fork のメディア範囲
 
@@ -20,19 +20,18 @@ package 名、cross-platform rendering interface を維持し、visual media を
 
 - MP4/MOV、Matroska/MKV、WebM、IVF、raw AV1/OBU の動的 AV1 video。
 - 単一の静的 primary image の AVIF。animated AVIF と image sequence は互換性対象外で、EOF 後も decode 済み image を surface に保持します。
-- 音声、埋め込み/外部字幕、弾幕は AV1 playback の付随機能です。audio-only media と他の visual codec は拒否します。
+- 音声のみ AV1 playback の付随機能です。字幕と弾幕は specialized runtime から削除済みです。audio-only media と他の visual codec は拒否します。
 
 ## 機能
 
 - **AV1 hardware decode** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)。利用不可時は AV1 software decode へ fallbackし、HarmonyOS は dav1d を直接選択
 - **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)。software frame は明示的な CPU upload を使用
 - **HDR/EDR 出力** -- Apple EDR、Windows HDR10、Android FP16 extended-linear scRGB negotiation と明示的な SDR fallback
-- **Metal ネイティブレンダラー** -- YCbCr サンプリング、色空間変換、トーンマッピング、字幕/弾幕合成を単一レンダーパスで実行 (macOS/iOS/tvOS)
-- **Direct3D 11 ネイティブレンダラー** -- Windows: D3D11VA ゼロコピーテクスチャ相互運用、YCbCr サンプリング、HDR10 出力、字幕/弾幕 overlay 合成
+- **Metal ネイティブレンダラー** -- YCbCr サンプリング、色空間変換、トーンマッピングを単一レンダーパスで実行 (macOS/iOS/tvOS)
+- **Direct3D 11 ネイティブレンダラー** -- Windows: D3D11VA ゼロコピーテクスチャ相互運用、YCbCr サンプリング、HDR10 出力
 - **ニューラル超解像** -- ArtCNN によるアニメ輝度 2x 超解像。Metal、D3D11、wgpu/Vulkan compute で render pipeline に統合
 - **音声出力** -- CoreAudio (macOS) / AudioQueue (iOS/tvOS) / WASAPI (Windows) / AAudio (Android) / OHAudio (HarmonyOS)、f32 PCM リングバッファ、音声クロック同期
-- **字幕** -- SRT / WebVTT / ASS パーサー、libass レンダリング（静的リンク）、埋め込みおよび外部字幕トラック
-- **弾幕** -- Bilibili XML / JSON パーサー、DFM+ 衝突回避レーン配置エンジン、グリフアトラスによるネイティブ GPU レンダリング
+- **互換境界** -- 旧 subtitle/danmaku C ABI symbol は link compatibility のため残りますが `PlayerError` を返し、parser/layout/renderer 実装は含みません
 - **再生エンジン** -- play / pause / stop / seek / 再生速度制御、音声マスタークロック同期、vsync 量子化フレームスケジューリング
 - **C ABI** -- 不透明ハンドル設計で、C / C++ / Swift / Dart FFI / 任意の FFI 対応言語から呼び出し可能。正確なエクスポート集合は `erika.h` を参照
 - **Flutter プラグイン** -- macOS + iOS + tvOS + Windows + Android + HarmonyOS の native view / Texture embedding と platform-native high-dynamic-range surface path
@@ -138,7 +137,7 @@ docs/                     アーキテクチャと組み込みドキュメント
 - [C ABI リファレンス](../docs/capi_reference.ja.md) — 全エクスポート関数、ステータスコード、所有権とスレッド規約
 - [組み込みガイド](../docs/integration.ja.md) — C/C++/Win32/Swift など非 Flutter ホストへの組み込み
 - [ビルドガイド](../docs/building.ja.md) — xtask、native 依存、クロスコンパイル
-- [Flutter 組み込み](../docs/flutter_embedding.ja.md) ・ [弾幕アーキテクチャ](../docs/danmaku_architecture.ja.md)
+- [Flutter 組み込み](../docs/flutter_embedding.ja.md)
 - [リリースとプリビルドバイナリ](../docs/releasing.md) — プラットフォーム別 `erika_capi` ライブラリの配布とパッケージング（英語）
 - [コントリビュート / 開発者ガイド](../CONTRIBUTING.ja.md) — リポジトリ構成、スレッドモデル、プラットフォームバックエンドの追加
 
@@ -159,8 +158,8 @@ docs/                     アーキテクチャと組み込みドキュメント
 # FFmpeg のビルド (LGPL プロファイル)
 cargo run -p xtask -- deps build --profile lgpl
 
-# 全依存関係のビルド (libass/FreeType/HarfBuzz/FriBidi 含む)
-cargo run -p xtask -- deps build --all --profile lgpl
+# AV1/AVIF native dependency のビルド
+cargo run -p xtask -- deps build --profile lgpl
 
 # 依存関係の状態確認
 cargo run -p xtask -- deps status

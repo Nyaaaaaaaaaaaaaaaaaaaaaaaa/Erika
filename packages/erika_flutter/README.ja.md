@@ -1,5 +1,8 @@
 # erika_flutter
 
+> AV1/AVIF specialized package は subtitle / danmaku 非対応です。旧 Dart method は
+> compatibility のため一時的に残り、呼び出すと明示的に失敗します。
+
 [中文](README.zh.md) | [English](README.md) | [日本語](README.ja.md)
 
 Erika メディア再生エンジン向けの Flutter plugin です。
@@ -31,7 +34,7 @@ macOS CocoaPods build は既定で arm64+x86_64 universal dynamic library を生
 dynamic library を build するには：
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl
+cargo run -p xtask -- deps build --profile lgpl
 cargo build -p erika_capi
 ```
 

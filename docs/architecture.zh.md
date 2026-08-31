@@ -31,15 +31,12 @@ Rust Player Core
 |------|------|------|
 | FFmpeg | 8.1.2 | Demux、decode、audio resample、平台硬解 |
 | dav1d | 1.5.1 | 所有目标的 AV1 软解回退（8-bit 与高位深） |
-| libass | 0.17.5 | ASS 字幕渲染 |
-| FreeType | 2.14.3 | 字体栅格化（libass 依赖） |
-| HarfBuzz | 14.2.1 | 文本 shaping（libass 依赖） |
-| FriBidi | 1.0.16 | 双向文本处理（libass 依赖） |
+| zlib | 1.3.2 | FFmpeg 使用的容器解压支持 |
 
-所有依赖都静态链接。libass 及其依赖默认启用（`features = ["libass"]`）。
+所有原生依赖都静态链接。
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl
+cargo run -p xtask -- deps build --profile lgpl
 cargo run -p xtask -- deps status
 ```
 
@@ -50,15 +47,14 @@ cargo run -p xtask -- deps status
 - **Demuxer**：持有 `AVFormatContext`，可选使用来自 `MediaSource` 的 Rust 后端自定义 `AVIOContext`。支持流选择、引用计数 packet 和基于时间戳的 seek。
 - **Decoder**：AV1 软件解码，以及 VideoToolbox、D3D11VA/DXVA2、MediaCodec 硬件后端。所有目标都使用源码构建的 dav1d 回退；OpenHarmony 因保留的 AVCodec bridge 只支持 AVC/HEVC 而直接选择 dav1d。硬件帧保留 BT.2020/PQ 元数据，并携带平台原生句柄供渲染器导入。
 - **AudioResampler**：封装 `libswresample`，输出 interleaved f32 PCM（默认 48 kHz stereo）。
-- **SubtitleDecoder**：解码内嵌文本和位图字幕流。
 
 ## 播放引擎
 
 `PlaybackSession` 负责打开媒体、选择轨道、配置解码后端，并产出视频帧和 PCM 音频块。
 
 完成 probe、创建 decoder 之前，session 必须确认存在 AV1 视觉轨。动态 AV1 只接受
-MP4/MOV、Matroska/WebM、IVF 与 raw AV1；AVIF 只承诺单张静态主图。音频、字幕和
-弹幕仅作为附属能力，非 AV1 视觉媒体与纯音频会通过现有错误通道返回明确支持范围。
+MP4/MOV、Matroska/WebM、IVF 与 raw AV1；AVIF 只承诺单张静态主图。音频仅作为
+附属能力；字幕和弹幕已删除。非 AV1 视觉媒体与纯音频会返回明确支持范围。
 
 解码器可用性是 session invariant：只要选中了视频轨，play、seek 和 video-frame pump 入口就必须有活动的视频 decoder。MediaCodec seek reopen 以及 Surface→ByteBuffer/software fallback 等破坏性切换会先记录 decoder unavailable reason；若最终 software decoder 也打开失败，这些入口会返回该明确错误并要求重新 open 媒体，绝不会进入只播音频的假 `Playing` 状态。
 
@@ -77,20 +73,13 @@ MP4/MOV、Matroska/WebM、IVF 与 raw AV1；AVIF 只承诺单张静态主图。�
 
 ## 字幕系统
 
-- **Parsing**：SRT、WebVTT、ASS 时间线解析。支持内嵌和外部字幕轨，外部轨可在运行时增删。
-- **libass renderer**：静态链接且默认启用。接收 ASS 脚本，调用 `ass_render_frame`，把 alpha plane 导入 Erika 的 overlay 系统。macOS 使用 CoreText 字体提供者，Windows 用 DirectWrite；其余目标运行时没有任何系统字体提供者（vendored libass 关闭了 fontconfig），因此 Erika 内嵌并在所有平台注册为内存字体的 Droid Sans Fallback 就是 libass 默认解析到的字体族。
-- **字幕样式**：自定义字体族与字体文件、颜色、度量（字号、描边、阴影、模糊、字距、缩放）、字形属性、描边样式、对齐与边距都作为回退值，补足脚本未指定的部分以及纯文本字幕的样式；度量还会再乘上字幕缩放。`override_mask` 会把选中的字段提升为 libass 的 selective style override，从而覆盖 ASS 对白自带的样式；覆盖用的度量经过重新归一，无论脚本声明何种 `PlayResY` 都落在同样的像素上。
-- **SubtitleRendererCore**：面向 renderer 的边界层，用 changed/unchanged frame 跟踪避免重复 GPU 上传。
+已从专用内核删除。旧 C ABI 符号仅作为链接兼容壳保留，并统一返回带明确说明的
+`PlayerError`。构建不再包含字幕 demuxer、decoder、字符集转换、字体或 libass 依赖。
 
 ## 弹幕系统
 
-弹幕子系统用 Rust 原生实现了 NipaPlay DFM+ 的布局算法。完整设计见 `docs/danmaku_architecture.md`。
-
-- **输入**：Bilibili XML、JSON、JSON-lines 解析。
-- **DanmakuSession**：多轨管理，支持按轨启用/禁用、按轨 offset、全局 offset。
-- **DFM+ layout core**：prepare / frame-query 分离。prepare 一次性处理整条轨道（测量、过滤、重复合并、碰撞避让、轨道分配），frame query 返回某一 media time 下的位置结果。
-- **Text rasterizer**：带 fill/outline alpha mask 的 glyph atlas，并通过 version 跟踪 GPU 纹理复用。
-- **Render plan**：`DanmakuRenderPlan` 携带 glyph instances，包含屏幕 rect、atlas tex rect、颜色、outline、shadow。Metal 和 wgpu 渲染器从 atlas 画实例化 quad。
+已从专用内核删除。旧 C ABI 符号仅保留链接兼容壳并统一返回 `PlayerError`；XML/JSON
+解析、DFM 排版、字体回退、字形图集、示例和架构文档均不再包含。
 
 ## 渲染器
 

@@ -1,5 +1,8 @@
 # Integrating Erika in a Native Host
 
+> **AV1/AVIF fork:** legacy subtitle and danmaku entry points remain only for
+> ABI compatibility and return an unsupported error.
+
 > Translations: [中文](integration.zh.md) · [日本語](integration.ja.md)
 
 This guide walks through embedding Erika in a non-Flutter host — a C/C++/Swift

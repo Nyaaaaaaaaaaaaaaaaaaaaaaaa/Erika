@@ -1,5 +1,7 @@
 # 在原生宿主中接入 Erika
 
+> **AV1/AVIF 专用 fork：**旧字幕与弹幕入口仅为 ABI 兼容保留，调用会返回不支持错误。
+
 本指南讲解如何把 Erika 嵌入非 Flutter 宿主——C/C++/Swift 应用、Win32 窗口，或任何
 带 C FFI 的运行时。它使用 **presenter（推送）模型**:Erika 负责解码、时序、音频、
 overlay 和呈现,宿主提供一个 surface 并每帧调一次 `render_tick`。

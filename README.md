@@ -11,7 +11,7 @@
 > 而 [NipaPlay](https://github.com/AimesSoft/NipaPlay-Reload) 来自《寒蝉鸣泣之时》古手梨花的口癖「にぱー☆」——社区里大家都叫她「梨花」。
 > 一个是台前的播放器，一个是幕后的引擎。同出一脉，互为表里。
 
-宿主应用只需提供一个渲染表面并发送播放命令——解码、时序同步、音视频渲染、字幕、弹幕、音频输出均由 Erika 内部完成，不经过宿主的渲染管线。
+宿主应用只需提供一个渲染表面并发送播放命令——解码、时序同步、音视频渲染和音频输出均由 Erika 内部完成，不经过宿主的渲染管线。
 
 ## 此 fork 的媒体边界
 
@@ -20,7 +20,7 @@
 
 - AV1 动态视频：MP4/MOV、Matroska/MKV、WebM、IVF 和 raw AV1/OBU；
 - AVIF：单张静态主图，首帧呈现后保留在渲染表面；animated AVIF 和 image sequence 不作兼容承诺；
-- 音频、内嵌/外挂字幕和弹幕只作为 AV1 播放的附属能力，不代表支持纯音频文件或其他视觉 codec。
+- 音频仅作为 AV1 播放的附属能力，不代表支持纯音频文件；字幕和弹幕能力已从专用内核删除。
 
 H.264、HEVC/HEIC、VP8/VP9、MPEG、JPEG、PNG、WebP 和纯音频输入会通过
 现有错误通道被明确拒绝。
@@ -30,12 +30,11 @@ H.264、HEVC/HEIC、VP8/VP9、MPEG、JPEG、PNG、WebP 和纯音频输入会通�
 - **AV1 硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)，不可用时明确回退 AV1 软解；HarmonyOS 直接使用 dav1d
 - **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan；软件帧走明确的 CPU upload
 - **HDR/EDR 输出** — Apple EDR、Windows HDR10，以及 Android FP16 extended-linear scRGB 协商与明确 SDR 回退
-- **原生 Metal 渲染器** — YCbCr 采样、色彩空间转换、tone mapping、字幕/弹幕合成，一次 render pass 完成 (macOS/iOS/tvOS)
-- **原生 Direct3D 11 渲染器** — Windows: D3D11VA 零拷贝纹理互操作、YCbCr 采样、HDR10 输出、字幕/弹幕 overlay 合成
+- **原生 Metal 渲染器** — YCbCr 采样、色彩空间转换和 tone mapping，一次 render pass 完成 (macOS/iOS/tvOS)
+- **原生 Direct3D 11 渲染器** — Windows: D3D11VA 零拷贝纹理互操作、YCbCr 采样和 HDR10 输出
 - **AI 超分** — ArtCNN 动漫亮度 2x 神经超分，支持 Metal、D3D11 与 wgpu/Vulkan compute，仅处理亮度并接入渲染管线
 - **音频输出** — CoreAudio (macOS) / AudioQueue (iOS/tvOS) / WASAPI (Windows) / AAudio (Android) / OHAudio (HarmonyOS)，f32 PCM ring buffer，音频时钟同步
-- **字幕** — SRT / WebVTT / ASS 解析，libass 渲染 (静态链接)，嵌入与外挂字幕轨
-- **弹幕** — Bilibili XML / JSON 解析，DFM+ 碰撞避让布局引擎，glyph atlas 原生 GPU 渲染
+- **兼容边界** — 旧 C ABI 的字幕/弹幕符号为保持二进制兼容而保留，但统一返回 `PlayerError`，不包含解析、排版或渲染实现
 - **播放引擎** — play / pause / stop / seek / 倍速，音频主时钟同步，vsync 量化调度
 - **C ABI** — opaque handle 设计，可从 C / C++ / Swift / Dart FFI / 任何 FFI 语言调用；以 `erika.h` 中的导出声明为准
 - **Flutter 插件** — macOS + iOS + tvOS + Windows + Android + HarmonyOS 原生视图/Texture 嵌入
@@ -147,7 +146,7 @@ docs/                     架构与嵌入文档
 - [原生接入指南](docs/integration.zh.md) — C/C++/Win32/Swift 等非 Flutter 宿主的端到端嵌入
 - Swift SDK — 此 fork 尚未发布；不会向上游 `AimesSoft/ErikaSwift` 写入
 - [构建与依赖指南](docs/building.zh.md) — xtask、native 依赖、交叉编译
-- [Flutter 嵌入](docs/flutter_embedding.zh.md) ・ [弹幕架构](docs/danmaku_architecture.md)
+- [Flutter 嵌入](docs/flutter_embedding.zh.md)
 - [平台能力矩阵](docs/platform_matrix.zh.md) — 区分可编译、CI 覆盖、真机验收与预编译发布
 - [发布与预编译产物](docs/releasing.md) — 各平台预编译 `erika_capi` 库下载与打包(英文)
 - [贡献 / 开发者指南](CONTRIBUTING.zh.md) — 仓库布局、线程模型、新增平台后端
@@ -168,9 +167,6 @@ docs/                     架构与嵌入文档
 ```sh
 # 构建 FFmpeg (LGPL profile)
 cargo run -p xtask -- deps build --profile lgpl
-
-# 构建全部依赖 (含 libass/FreeType/HarfBuzz/FriBidi)
-cargo run -p xtask -- deps build --all --profile lgpl
 
 # 查看依赖状态
 cargo run -p xtask -- deps status

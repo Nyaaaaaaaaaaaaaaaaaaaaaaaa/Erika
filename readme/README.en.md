@@ -11,7 +11,7 @@
 > [NipaPlay](https://github.com/AimesSoft/NipaPlay-Reload) takes its name from **Furude Rika**'s catchphrase "nipah~☆" in *Higurashi When They Cry* — the community simply calls her "Rika".
 > One is the player the audience sees; the other is the engine behind the curtain. Two sides of the same coin, from the same universe.
 
-The host application provides a rendering surface and sends playback commands — decoding, timing, video rendering, subtitles, danmaku, and audio output are handled entirely inside Erika, without passing through the host's rendering pipeline.
+The host application provides a rendering surface and sends playback commands — decoding, timing, video rendering, and audio output are handled entirely inside Erika, without passing through the host's rendering pipeline.
 
 ## Media scope of this fork
 
@@ -22,19 +22,19 @@ accepting only these visual formats:
 - Dynamic AV1 video in MP4/MOV, Matroska/MKV, WebM, IVF, or raw AV1/OBU.
 - A single static primary image in AVIF. Animated AVIF and image sequences are
   not compatibility commitments; the decoded image remains on the render surface at EOF.
-- Audio, embedded/external subtitles, and danmaku are ancillary to AV1
-  playback. Audio-only media and every other visual codec are rejected.
+- Audio is ancillary to AV1 playback. Subtitles and danmaku are removed from
+  this specialized runtime. Audio-only media and every other visual codec are rejected.
 
 ## Features
 
 - **AV1 hardware decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA/DXVA2 (Windows), and MediaCodec (Android), with explicit AV1 software fallback; HarmonyOS selects dav1d directly
 - **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), and MediaCodec Surface to AHardwareBuffer/Vulkan (Android), with explicit CPU upload for software frames
 - **HDR/EDR output** -- Apple EDR, Windows HDR10, and Android FP16 extended-linear scRGB negotiation with explicit SDR fallback
-- **Native Metal renderer** -- YCbCr sampling, color space conversion, tone mapping, subtitle/danmaku compositing in a single render pass (macOS/iOS/tvOS)
-- **Native Direct3D 11 renderer** -- Windows: D3D11VA zero-copy texture interop, YCbCr sampling, HDR10 output, subtitle/danmaku overlay compositing
+- **Native Metal renderer** -- YCbCr sampling, color space conversion, and tone mapping in a single render pass (macOS/iOS/tvOS)
+- **Native Direct3D 11 renderer** -- Windows: D3D11VA zero-copy texture interop, YCbCr sampling, and HDR10 output
 - **Neural upscaling** -- ArtCNN anime luma 2x super-resolution using Metal, D3D11, and wgpu/Vulkan compute, integrated into the rendering pipeline
 - **Audio output** -- CoreAudio (macOS) / AudioQueue (iOS/tvOS) / WASAPI (Windows) / AAudio (Android) / OHAudio (HarmonyOS), f32 PCM ring buffer, audio clock synchronization
-- **Subtitles** -- SRT / WebVTT / ASS parsing, libass rendering (statically linked), embedded and external subtitle tracks
+- **Compatibility boundary** -- legacy subtitle/danmaku C ABI symbols remain link-compatible but return `PlayerError`; no parser, layout, or renderer implementation is included
 - **Danmaku** -- Bilibili XML / JSON parsing, DFM+ collision-aware lane layout engine, glyph atlas native GPU rendering
 - **Playback engine** -- play / pause / stop / seek / rate control, audio-master clock discipline, vsync-quantized frame scheduling
 - **C ABI** -- opaque handle design with a versioned public header; callable from C / C++ / Swift / Dart FFI / any FFI-capable language. See `erika.h` for the authoritative export set.
@@ -141,7 +141,7 @@ docs/                     Architecture and embedding documentation
 - [C ABI Reference](../docs/capi_reference.md) — every export, status codes, ownership & threading
 - [Integration Guide](../docs/integration.md) — embedding in C/C++/Win32/Swift and other non-Flutter hosts
 - [Build Guide](../docs/building.md) — xtask, native deps, cross-compilation
-- [Flutter Embedding](../docs/flutter_embedding.md) · [Danmaku Architecture](../docs/danmaku_architecture.en.md)
+- [Flutter Embedding](../docs/flutter_embedding.md)
 - [Releasing & Prebuilt Binaries](../docs/releasing.md) — downloadable per-platform `erika_capi` libraries and packaging
 - [Contributing / Developer Guide](../CONTRIBUTING.md) — repo layout, threading model, adding a platform backend
 
@@ -162,8 +162,8 @@ docs/                     Architecture and embedding documentation
 # Build FFmpeg (LGPL profile)
 cargo run -p xtask -- deps build --profile lgpl
 
-# Build all dependencies (including libass/FreeType/HarfBuzz/FriBidi)
-cargo run -p xtask -- deps build --all --profile lgpl
+# Build the AV1/AVIF native dependencies
+cargo run -p xtask -- deps build --profile lgpl
 
 # Check dependency status
 cargo run -p xtask -- deps status

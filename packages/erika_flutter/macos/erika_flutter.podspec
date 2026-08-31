@@ -114,10 +114,10 @@ else
     DIST="$SOURCE_ROOT/third_party/dist/$RUST_TARGET/$ERIKA_NATIVE_PROFILE"
     DAV1D_DIR="$DIST/dav1d"
     DAV1D_MARKER="$SOURCE_ROOT/third_party/build/$RUST_TARGET/$ERIKA_NATIVE_PROFILE/dav1d/dav1d-built.txt"
-    if [ ! -f "$DIST/ffmpeg/include/libavformat/avformat.h" ] || [ ! -f "$DAV1D_DIR/include/dav1d/dav1d.h" ] || [ ! -f "$DAV1D_DIR/lib/libdav1d.a" ] || [ ! -f "$DAV1D_MARKER" ] || ! grep -qx 'dav1d=1.5.1' "$DAV1D_MARKER" || [ ! -f "$DIST/libass/lib/libass.a" ]; then
-      (cd "$SOURCE_ROOT" && cargo run -p xtask -- deps build --all --profile "$ERIKA_NATIVE_PROFILE" --target "$RUST_TARGET" --jobs "$HOST_JOBS")
+    if [ ! -f "$DIST/ffmpeg/include/libavformat/avformat.h" ] || [ ! -f "$DAV1D_DIR/include/dav1d/dav1d.h" ] || [ ! -f "$DAV1D_DIR/lib/libdav1d.a" ] || [ ! -f "$DAV1D_MARKER" ] || ! grep -qx 'dav1d=1.5.1' "$DAV1D_MARKER"; then
+      (cd "$SOURCE_ROOT" && cargo run -p xtask -- deps build --profile "$ERIKA_NATIVE_PROFILE" --target "$RUST_TARGET" --jobs "$HOST_JOBS")
     fi
-    (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$DIST/ffmpeg" ERIKA_DAV1D_DIR="$DAV1D_DIR" ERIKA_LIBASS_DIR="$DIST/libass" ERIKA_FREETYPE_DIR="$DIST/freetype" ERIKA_HARFBUZZ_DIR="$DIST/harfbuzz" ERIKA_FRIBIDI_DIR="$DIST/fribidi" cargo build -p erika_capi --target "$RUST_TARGET" --no-default-features --features libass $CARGO_ARGS)
+    (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$DIST/ffmpeg" ERIKA_DAV1D_DIR="$DAV1D_DIR" cargo build -p erika_capi --target "$RUST_TARGET" --no-default-features $CARGO_ARGS)
     ARCH_DYLIB="$SOURCE_ROOT/target/$RUST_TARGET/$CARGO_PROFILE/liberika_capi.dylib"
     if [ ! -f "$ARCH_DYLIB" ]; then
       echo "error: $ARCH_DYLIB was not produced by the Erika build" >&2

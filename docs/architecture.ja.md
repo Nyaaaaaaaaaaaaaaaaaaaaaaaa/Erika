@@ -31,15 +31,12 @@ Rust Player Core
 |----------|-----------|------|
 | FFmpeg | 8.1.2 | Demux、decode、audio resample、プラットフォーム HW decode |
 | dav1d | 1.5.1 | 全ターゲットの AV1 software fallback（8-bit / high bit depth） |
-| libass | 0.17.5 | ASS subtitle 描画 |
-| FreeType | 2.14.3 | フォントラスタライズ（libass 依存） |
-| HarfBuzz | 14.2.1 | テキストシェーピング（libass 依存） |
-| FriBidi | 1.0.16 | 双方向テキスト処理（libass 依存） |
+| zlib | 1.3.2 | FFmpeg が使用する container decompression |
 
-すべて静的リンクです。libass とその依存関係は既定で有効です（`features = ["libass"]`）。
+native dependency はすべて static link です。
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl
+cargo run -p xtask -- deps build --profile lgpl
 cargo run -p xtask -- deps status
 ```
 
@@ -50,7 +47,6 @@ cargo run -p xtask -- deps status
 - **Demuxer**: `AVFormatContext` を保持し、`MediaSource` 由来の Rust-backed custom `AVIOContext` を使うこともできます。stream selection、reference-counted packets、timestamp-based seek をサポートします。
 - **Decoder**: AV1 software decode と VideoToolbox、D3D11VA/DXVA2、MediaCodec hardware backend を持ちます。全ターゲットで source-built dav1d に fallback し、OpenHarmony は保持された AVCodec bridge が AVC/HEVC のみ対応するため dav1d を直接選択します。
 - **AudioResampler**: `libswresample` を包み、interleaved f32 PCM（既定 48 kHz stereo）へ変換します。
-- **SubtitleDecoder**: 埋め込みテキスト字幕と bitmap 字幕ストリームをデコードします。
 
 ## 再生エンジン
 
@@ -58,8 +54,8 @@ cargo run -p xtask -- deps status
 
 probe 完了後、decoder 作成前に AV1 visual track の存在を必須にします。dynamic AV1 は
 MP4/MOV、Matroska/WebM、IVF、raw AV1、AVIF は単一 static primary image のみです。
-audio/subtitle/danmaku は付随機能で、non-AV1 visual と audio-only media は既存 error
-channel から明示的な supported scope を返します。
+audio のみが付随機能です。subtitle と danmaku は削除されています。non-AV1 visual
+と audio-only media は既存 error channel から明示的な supported scope を返します。
 
 Decoder availability は session invariant です。video track が選択されている場合、play / seek / video-frame pump の各入口には active video decoder が必要です。MediaCodec seek reopen や Surface→ByteBuffer/software fallback のような破壊的 transition では、先に decoder-unavailable reason を記録します。最終 software decoder の open まで失敗した場合、各入口はその明示的 error を返して media の reopen を要求し、audio-only の偽 `Playing` state には入りません。
 
@@ -78,20 +74,15 @@ Decoder availability は session invariant です。video track が選択され�
 
 ## 字幕システム
 
-- **Parsing**: SRT、WebVTT、ASS timeline parsing。embedded / external subtitle track を扱い、external track は runtime で追加・削除できます。
-- **libass renderer**: static link で既定有効。ASS script を受け取り、`ass_render_frame` を呼び、alpha plane を Erika の overlay system に取り込みます。macOS では CoreText font provider、Windows では DirectWrite を使います。それ以外の target は system font provider 無しで動作するため（vendored libass は fontconfig を無効化）、全 platform で memory font として登録される内蔵の Droid Sans Fallback が libass の既定 family になります。
-- **字幕スタイル**: custom な font family と font file、色、metrics（サイズ・縁取り・影・blur・字間・拡大率）、attribute、border style、alignment、margin は fallback として働き、script が指定していない部分と plain-text 字幕の styling を埋めます（metrics には字幕 scale がさらに掛かります）。`override_mask` は選んだ field を libass の selective style override に昇格させ、ASS dialogue が要求する styling も置き換えます。override 時の metrics は再正規化され、script の `PlayResY` に関係なく同じ pixel になります。
-- **SubtitleRendererCore**: changed / unchanged frame を追跡し、不要な GPU upload を避ける renderer-facing boundary です。
+specialized runtime から削除済みです。旧 C ABI symbol は link compatibility shell として
+残り、明示的な unsupported `PlayerError` を返します。subtitle demuxer/decoder、charset
+conversion、font、libass dependency は build されません。
 
 ## 弾幕システム
 
-弾幕サブシステムは NipaPlay DFM+ の layout algorithm を Rust で native 実装しています。完全な設計は `docs/danmaku_architecture.md` を参照してください。
-
-- **入力**: Bilibili XML、JSON、JSON-lines parsing。
-- **DanmakuSession**: multi-track 管理、track ごとの enable/disable、track offset、global offset。
-- **DFM+ layout core**: prepare / frame-query 分離。prepare は measurement、filtering、duplicate merge、collision avoidance、lane allocation を一括で処理します。frame query は指定 media time の positioned items を返します。
-- **Text rasterizer**: fill / outline alpha mask を持つ glyph atlas と、GPU texture reuse 用の version tracking。
-- **Render plan**: `DanmakuRenderPlan` は screen rect、atlas tex rect、色、outline、shadow を持つ glyph instances を運びます。Metal と wgpu は atlas から instanced quad を描画します。
+specialized runtime から削除済みです。旧 C ABI symbol は link compatibility shell として
+残り `PlayerError` を返します。XML/JSON parser、DFM layout、font fallback、glyph atlas、
+example、architecture document は含まれません。
 
 ## レンダラー
 

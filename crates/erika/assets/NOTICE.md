@@ -1,7 +1,10 @@
-## Droid Sans Fallback
+## Erika Debug HUD font subset
 
-`subfont.ttf` is the NipaPlay default danmaku font, Droid Sans Fallback.
-Its embedded metadata states:
+`hudfont.ttf` is an ASCII-only subset of Droid Sans Fallback used exclusively
+by Erika's optional diagnostic HUD. It is not exposed to subtitle or danmaku
+rendering.
+
+The original font metadata states:
 
 - Digitized data copyright Google Corporation © 2006.
 - Droid is a trademark of Google and may be registered in certain jurisdictions.

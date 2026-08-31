@@ -1,5 +1,8 @@
 # Erika C ABI リファレンス
 
+> **AV1/AVIF specialized build:** subtitle / danmaku 実装は削除済みです。旧 symbol は
+> binary compatibility のためだけに残り、呼び出すと `PlayerError` を返します。
+
 本書は `erika_capi` が公開する安定 C ABI を説明します。宣言は
 [`crates/erika_capi/include/erika.h`](../crates/erika_capi/include/erika.h) にあります。
 この ABI は Rust 以外のすべてのホスト（C、C++、Swift、Dart FFI、Win32 …）の唯一の

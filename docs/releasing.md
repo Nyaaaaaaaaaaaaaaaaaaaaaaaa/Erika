@@ -48,7 +48,7 @@ Every archive also includes `include/erika.h`, `LICENSE` (Erika, MPL-2.0),
 under `licenses/`, and a `MANIFEST.txt` recording the tag/commit.
 Every GitHub Release also includes `SHA256SUMS` with the digest of each archive.
 
-The native dependencies (FFmpeg, libass, FreeType, HarfBuzz, FriBidi, zlib,
+The native dependencies (FFmpeg, dav1d, zlib,
 dav1d, and SoundTouch) are **statically linked** via the `lgpl`
 profile, so each library is self-contained except for OS frameworks
 (VideoToolbox/Metal/CoreAudio on Apple; Direct3D 11 / WASAPI on Windows;
@@ -191,7 +191,7 @@ The following environment variables customize that behavior:
   bundles it.
 - **iOS** (podspec): downloads `erika-capi-ios.zip`, picks the device or
   simulator slice from the XCFramework, and links it. The prebuilt static lib
-  must be built `--no-default-features --features libass` to match the plugin's
+  must be built `--no-default-features` to match the plugin's
   link flags (the release workflow does this); verify against a release built
   that way before relying on it.
 - **tvOS** (podspec): downloads `erika-capi-tvos.zip` and selects the device or
@@ -228,9 +228,9 @@ beside your binary).
 
 Erika is MPL-2.0. The bundled native libraries keep their own licenses
 (`THIRD_PARTY_NOTICES.md`). Because Erika is open source with a reproducible
-build, the LGPL components (FFmpeg, FriBidi, SoundTouch) satisfy the LGPL relinking
+build, the LGPL components (FFmpeg and SoundTouch) satisfy the LGPL relinking
 requirement: the `MANIFEST.txt` records the exact source commit, and anyone can
-rebuild against a modified FFmpeg via `xtask deps build --all` + `cargo build`
+rebuild against a modified FFmpeg via `xtask deps build` + `cargo build`
 (see [building.md](building.md)). Keep `LICENSE` and `THIRD_PARTY_NOTICES.md` in
 every published archive.
 

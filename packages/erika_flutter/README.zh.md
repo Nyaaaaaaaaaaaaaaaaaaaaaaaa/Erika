@@ -1,5 +1,7 @@
 # erika_flutter
 
+> AV1/AVIF 专用包不支持字幕或弹幕；旧 Dart 方法暂仅为兼容保留，调用会明确失败。
+
 [中文](README.zh.md) | [English](README.md) | [日本語](README.ja.md)
 
 Erika 媒体播放引擎的 Flutter plugin。
@@ -31,7 +33,7 @@ macOS CocoaPods 构建默认生成 arm64+x86_64 universal 动态库。依赖项�
 构建动态库：
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl
+cargo run -p xtask -- deps build --profile lgpl
 cargo build -p erika_capi
 ```
 

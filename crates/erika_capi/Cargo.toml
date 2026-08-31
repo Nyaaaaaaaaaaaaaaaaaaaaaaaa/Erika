@@ -11,7 +11,7 @@ build = "build.rs"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = ["libass", "wgpu"]
+default = ["wgpu"]
 libass = ["erika/libass"]
 wgpu = ["erika/wgpu"]
 

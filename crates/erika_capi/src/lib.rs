@@ -133,6 +133,13 @@ fn set_last_error(message: impl Into<String>) {
     });
 }
 
+fn removed_text_overlay_api(kind: &str) -> ErikaStatus {
+    set_last_error(format!(
+        "{kind} support is not included in this AV1/AVIF-specialized Erika build"
+    ));
+    ErikaStatus::PlayerError
+}
+
 fn ensure_last_error(status: ErikaStatus) {
     LAST_ERROR.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -914,6 +921,12 @@ pub unsafe extern "C" fn erika_add_external_subtitle(
     uri: *const c_char,
     out_track_id: *mut i64,
 ) -> ErikaStatus {
+    if !out_track_id.is_null() {
+        unsafe { *out_track_id = -1 };
+    }
+    let _ = (handle, uri);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if out_track_id.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -937,6 +950,9 @@ pub unsafe extern "C" fn erika_remove_subtitle_track(
     handle: *mut ErikaHandle,
     track_id: i64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_handle_mut(handle, |handle| {
         status_from_player_result(handle.player.remove_subtitle_track(track_id))
     })
@@ -957,6 +973,9 @@ pub unsafe extern "C" fn erika_select_subtitle_track(
     handle: *mut ErikaHandle,
     track_id: i64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_handle_mut(handle, |handle| {
         status_from_player_result(
             handle
@@ -2018,6 +2037,9 @@ pub unsafe extern "C" fn erika_presenter_set_subtitle_scale(
     handle: *mut ErikaPresenterHandle,
     scale: f64,
 ) -> ErikaStatus {
+    let _ = (handle, scale);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         handle.presenter.set_subtitle_scale(scale);
         ErikaStatus::Ok
@@ -2039,6 +2061,9 @@ pub unsafe extern "C" fn erika_presenter_set_subtitle_font(
     family: *const c_char,
     file_path: *const c_char,
 ) -> ErikaStatus {
+    let _ = (handle, family, file_path);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let family = optional_c_string(family).unwrap_or_default();
         let file_path = optional_c_string(file_path).unwrap_or_default();
@@ -2059,6 +2084,9 @@ pub unsafe extern "C" fn erika_presenter_set_subtitle_style(
     handle: *mut ErikaPresenterHandle,
     style: ErikaSubtitleStyle,
 ) -> ErikaStatus {
+    let _ = (handle, style);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let style = match subtitle_style_from_c(style) {
             Ok(style) => style,
@@ -2083,6 +2111,12 @@ pub unsafe extern "C" fn erika_presenter_register_subtitle_memory_font(
     data_len: usize,
     out_font_id: *mut u64,
 ) -> ErikaStatus {
+    if !out_font_id.is_null() {
+        unsafe { *out_font_id = 0 };
+    }
+    let _ = (handle, data, data_len);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if out_font_id.is_null() || (data_len > 0 && data.is_null()) {
         return ErikaStatus::NullPointer;
     }
@@ -2115,6 +2149,9 @@ pub unsafe extern "C" fn erika_presenter_select_subtitle_memory_fonts(
     font_ids: *const u64,
     font_id_count: usize,
 ) -> ErikaStatus {
+    let _ = (handle, font_ids, font_id_count);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if font_id_count > 0 && font_ids.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2139,6 +2176,9 @@ pub unsafe extern "C" fn erika_presenter_select_subtitle_memory_fonts(
 pub unsafe extern "C" fn erika_presenter_clear_subtitle_memory_fonts(
     handle: *mut ErikaPresenterHandle,
 ) -> ErikaStatus {
+    let _ = handle;
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         handle.presenter.clear_subtitle_memory_fonts();
         ErikaStatus::Ok
@@ -2157,6 +2197,12 @@ pub unsafe extern "C" fn erika_presenter_get_subtitle_memory_font_status(
     handle: *mut ErikaPresenterHandle,
     out_status: *mut ErikaSubtitleMemoryFontStatus,
 ) -> ErikaStatus {
+    if !out_status.is_null() {
+        unsafe { *out_status = ErikaSubtitleMemoryFontStatus::default() };
+    }
+    let _ = handle;
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if out_status.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2197,6 +2243,12 @@ pub unsafe extern "C" fn erika_presenter_get_subtitle_memory_font_info(
     font_id: u64,
     out_info: *mut ErikaSubtitleMemoryFontInfo,
 ) -> ErikaStatus {
+    if !out_info.is_null() {
+        unsafe { *out_info = ErikaSubtitleMemoryFontInfo::default() };
+    }
+    let _ = (handle, font_id);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if out_info.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2333,6 +2385,12 @@ pub unsafe extern "C" fn erika_presenter_add_external_subtitle(
     uri: *const c_char,
     out_track_id: *mut i64,
 ) -> ErikaStatus {
+    if !out_track_id.is_null() {
+        unsafe { *out_track_id = -1 };
+    }
+    let _ = (handle, uri);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     if out_track_id.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2413,6 +2471,9 @@ pub unsafe extern "C" fn erika_presenter_remove_subtitle_track(
     handle: *mut ErikaPresenterHandle,
     track_id: i64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         status_from_player_result(handle.presenter.remove_subtitle_track(track_id))
     })
@@ -2451,6 +2512,9 @@ pub unsafe extern "C" fn erika_presenter_select_subtitle_track(
     handle: *mut ErikaPresenterHandle,
     track_id: i64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id);
+    return removed_text_overlay_api("subtitle");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         status_from_player_result(
             handle
@@ -2472,6 +2536,9 @@ pub unsafe extern "C" fn erika_presenter_load_danmaku_file(
     handle: *mut ErikaPresenterHandle,
     uri: *const c_char,
 ) -> ErikaStatus {
+    let _ = (handle, uri);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let uri = match c_string(uri) {
             Ok(uri) => uri,
@@ -2502,6 +2569,9 @@ pub unsafe extern "C" fn erika_presenter_load_danmaku_json(
     handle: *mut ErikaPresenterHandle,
     json: *const c_char,
 ) -> ErikaStatus {
+    let _ = (handle, json);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let json = match c_string(json) {
             Ok(json) => json,
@@ -2535,6 +2605,12 @@ pub unsafe extern "C" fn erika_presenter_add_danmaku_track_file(
     offset_micros: i64,
     out_track_id: *mut u64,
 ) -> ErikaStatus {
+    if !out_track_id.is_null() {
+        unsafe { *out_track_id = 0 };
+    }
+    let _ = (handle, uri, name, offset_micros);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     if out_track_id.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2578,6 +2654,12 @@ pub unsafe extern "C" fn erika_presenter_add_danmaku_track_json(
     offset_micros: i64,
     out_track_id: *mut u64,
 ) -> ErikaStatus {
+    if !out_track_id.is_null() {
+        unsafe { *out_track_id = 0 };
+    }
+    let _ = (handle, json, name, offset_micros);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     if out_track_id.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2615,6 +2697,9 @@ pub unsafe extern "C" fn erika_presenter_remove_danmaku_track(
     handle: *mut ErikaPresenterHandle,
     track_id: u64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         if handle.presenter.remove_danmaku_track(track_id) {
             ErikaStatus::Ok
@@ -2637,6 +2722,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_track_enabled(
     track_id: u64,
     enabled: bool,
 ) -> ErikaStatus {
+    let _ = (handle, track_id, enabled);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         if handle
             .presenter
@@ -2662,6 +2750,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_track_offset(
     track_id: u64,
     offset_micros: i64,
 ) -> ErikaStatus {
+    let _ = (handle, track_id, offset_micros);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         if handle
             .presenter
@@ -2686,6 +2777,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_global_offset(
     handle: *mut ErikaPresenterHandle,
     offset_micros: i64,
 ) -> ErikaStatus {
+    let _ = (handle, offset_micros);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         handle.presenter.set_danmaku_global_offset(offset_micros);
         ErikaStatus::Ok
@@ -2706,6 +2800,12 @@ pub unsafe extern "C" fn erika_presenter_danmaku_tracks(
     capacity: usize,
     out_len: *mut usize,
 ) -> ErikaStatus {
+    if !out_len.is_null() {
+        unsafe { *out_len = 0 };
+    }
+    let _ = (handle, out_tracks, capacity);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     if out_len.is_null() || (capacity > 0 && out_tracks.is_null()) {
         return ErikaStatus::NullPointer;
     }
@@ -2730,6 +2830,9 @@ pub unsafe extern "C" fn erika_presenter_danmaku_tracks(
 pub unsafe extern "C" fn erika_presenter_clear_danmaku(
     handle: *mut ErikaPresenterHandle,
 ) -> ErikaStatus {
+    let _ = handle;
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         handle.presenter.clear_danmaku();
         ErikaStatus::Ok
@@ -2748,6 +2851,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_enabled(
     handle: *mut ErikaPresenterHandle,
     enabled: bool,
 ) -> ErikaStatus {
+    let _ = (handle, enabled);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         handle.presenter.set_danmaku_enabled(enabled);
         ErikaStatus::Ok
@@ -2784,6 +2890,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_config(
     handle: *mut ErikaPresenterHandle,
     config: ErikaDanmakuConfig,
 ) -> ErikaStatus {
+    let _ = (handle, config);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let base = handle
             .presenter
@@ -2827,6 +2936,12 @@ pub unsafe extern "C" fn erika_presenter_get_danmaku_config(
     handle: *mut ErikaPresenterHandle,
     out_config: *mut ErikaDanmakuConfig,
 ) -> ErikaStatus {
+    if !out_config.is_null() {
+        unsafe { *out_config = ErikaDanmakuConfig::default() };
+    }
+    let _ = handle;
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     if out_config.is_null() {
         return ErikaStatus::NullPointer;
     }
@@ -2856,6 +2971,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_font(
     family: *const c_char,
     file_path: *const c_char,
 ) -> ErikaStatus {
+    let _ = (handle, family, file_path);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let family = optional_c_string(family).unwrap_or_default();
         let file_path = optional_c_string(file_path).unwrap_or_default();
@@ -2876,6 +2994,9 @@ pub unsafe extern "C" fn erika_presenter_set_danmaku_block_words_json(
     handle: *mut ErikaPresenterHandle,
     json: *const c_char,
 ) -> ErikaStatus {
+    let _ = (handle, json);
+    return removed_text_overlay_api("danmaku");
+    #[allow(unreachable_code)]
     with_presenter_mut(handle, |handle| {
         let json = match c_string(json) {
             Ok(json) => json,
@@ -4654,7 +4775,7 @@ mod tests {
     }
 
     #[test]
-    fn c_external_subtitle_api_rejects_null_pointers() {
+    fn c_external_subtitle_api_reports_removed_support() {
         let subtitle_uri = std::ffi::CString::new("/tmp/subs.srt").unwrap();
         let handle = erika_create();
         assert!(!handle.is_null());
@@ -4662,16 +4783,16 @@ mod tests {
         let status = unsafe {
             erika_add_external_subtitle(handle, subtitle_uri.as_ptr(), std::ptr::null_mut())
         };
-        assert_eq!(status, ErikaStatus::NullPointer);
+        assert_eq!(status, ErikaStatus::PlayerError);
 
         let mut track_id = 0;
         let status = unsafe {
             erika_add_external_subtitle(std::ptr::null_mut(), subtitle_uri.as_ptr(), &mut track_id)
         };
-        assert_eq!(status, ErikaStatus::NullPointer);
+        assert_eq!(status, ErikaStatus::PlayerError);
 
         let status = unsafe { erika_remove_subtitle_track(std::ptr::null_mut(), 1_000_001) };
-        assert_eq!(status, ErikaStatus::NullPointer);
+        assert_eq!(status, ErikaStatus::PlayerError);
 
         unsafe { erika_destroy(handle) };
     }
@@ -5384,19 +5505,19 @@ mod tests {
         .unwrap();
         assert_eq!(
             unsafe { erika_presenter_load_danmaku_json(handle, json.as_ptr()) },
-            ErikaStatus::Ok
+            ErikaStatus::PlayerError
         );
         assert_eq!(
             unsafe { erika_presenter_set_danmaku_enabled(handle, true) },
-            ErikaStatus::Ok
+            ErikaStatus::PlayerError
         );
         assert_eq!(
             unsafe { erika_presenter_set_danmaku_config(handle, ErikaDanmakuConfig::default()) },
-            ErikaStatus::Ok
+            ErikaStatus::PlayerError
         );
         assert_eq!(
             unsafe { erika_presenter_clear_danmaku(handle) },
-            ErikaStatus::Ok
+            ErikaStatus::PlayerError
         );
 
         unsafe { erika_presenter_destroy(handle) };
@@ -5524,7 +5645,7 @@ mod tests {
     fn c_presenter_memory_font_round_trip_exposes_status_and_info() {
         let handle = erika_presenter_create();
         assert!(!handle.is_null());
-        let font = include_bytes!("../../erika/assets/subfont.ttf");
+        let font = b"removed";
         let mut font_id = 0;
         assert_eq!(
             unsafe {
@@ -5535,43 +5656,7 @@ mod tests {
                     &mut font_id,
                 )
             },
-            ErikaStatus::Ok
-        );
-        assert!(font_id > 0);
-        assert_eq!(
-            unsafe { erika_presenter_select_subtitle_memory_fonts(handle, &font_id, 1) },
-            ErikaStatus::Ok
-        );
-
-        let mut status = ErikaSubtitleMemoryFontStatus::default();
-        assert_eq!(
-            unsafe { erika_presenter_get_subtitle_memory_font_status(handle, &mut status) },
-            ErikaStatus::Ok
-        );
-        assert_eq!(status.registered_count, 1);
-        assert_eq!(status.registered_bytes, font.len());
-        assert_eq!(status.selected_count, 1);
-        assert_eq!(unsafe { *status.selected_ids }, font_id);
-        unsafe { erika_subtitle_memory_font_status_free(&mut status) };
-        assert!(status.selected_ids.is_null());
-
-        let mut info = ErikaSubtitleMemoryFontInfo::default();
-        assert_eq!(
-            unsafe { erika_presenter_get_subtitle_memory_font_info(handle, font_id, &mut info) },
-            ErikaStatus::Ok
-        );
-        assert_eq!(info.id, font_id);
-        assert_eq!(info.byte_len, font.len());
-        assert!(info.face_count > 0);
-        let face = unsafe { &*info.faces };
-        assert!(!face.families_json.is_null());
-        assert!(!face.post_script_name.is_null());
-        unsafe { erika_subtitle_memory_font_info_free(&mut info) };
-        assert!(info.faces.is_null());
-
-        assert_eq!(
-            unsafe { erika_presenter_clear_subtitle_memory_fonts(handle) },
-            ErikaStatus::Ok
+            ErikaStatus::PlayerError
         );
         unsafe { erika_presenter_destroy(handle) };
     }
@@ -5584,7 +5669,7 @@ mod tests {
         target_env = "ohos"
     ))]
     #[test]
-    fn c_presenter_memory_font_rejects_invalid_pointers_and_ids() {
+    fn c_presenter_memory_font_api_reports_removed_support() {
         assert_eq!(
             unsafe {
                 erika_presenter_register_subtitle_memory_font(
@@ -5594,13 +5679,13 @@ mod tests {
                     std::ptr::null_mut(),
                 )
             },
-            ErikaStatus::NullPointer
+            ErikaStatus::PlayerError
         );
         let handle = erika_presenter_create();
         assert!(!handle.is_null());
         assert_eq!(
             unsafe { erika_presenter_select_subtitle_memory_fonts(handle, std::ptr::null(), 1) },
-            ErikaStatus::NullPointer
+            ErikaStatus::PlayerError
         );
         assert_eq!(
             unsafe { erika_presenter_select_subtitle_memory_fonts(handle, &99, 1) },

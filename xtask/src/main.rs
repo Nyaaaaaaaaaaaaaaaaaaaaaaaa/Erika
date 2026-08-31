@@ -16,10 +16,6 @@ const GAS_PREPROCESSOR_REVISION: &str = "d09971fad329d32df19f5bbafe88cf2f0ed04ed
 const GAS_PREPROCESSOR_PATCH_VERSION: &str = "erika-tbnz-v1";
 const GAS_PREPROCESSOR_URL: &str = "https://raw.githubusercontent.com/libav/gas-preprocessor/d09971fad329d32df19f5bbafe88cf2f0ed04ed7/gas-preprocessor.pl";
 const DAV1D_VERSION: &str = "1.5.1";
-const LIBASS_VERSION: &str = "0.17.5";
-const HARFBUZZ_VERSION: &str = "14.2.1";
-const FREETYPE_VERSION: &str = "2.14.3";
-const FRIBIDI_VERSION: &str = "1.0.16";
 const ZLIB_VERSION: &str = "1.3.2";
 const DEFAULT_ANDROID_API_LEVEL: u32 = 26;
 
@@ -36,36 +32,6 @@ const FFMPEG_PATCHES: &[&str] = &[
 const DAV1D_ARCHIVE: &str = "dav1d-1.5.1.tar.gz";
 const DAV1D_DIR: &str = "dav1d-1.5.1";
 const DAV1D_URLS: &[&str] = &["https://codeload.github.com/videolan/dav1d/tar.gz/refs/tags/1.5.1"];
-
-const LIBASS_ARCHIVE: &str = "libass-0.17.5.tar.xz";
-const LIBASS_DIR: &str = "libass-0.17.5";
-const LIBASS_URLS: &[&str] = &[
-    "https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz",
-    "https://codeload.github.com/libass/libass/tar.gz/refs/tags/0.17.5",
-];
-const LIBASS_PATCHSET_VERSION: &str = "erika-ordered-font-fallback-v1";
-const LIBASS_BUILD_VERSION: &str = "0.17.5+erika-ordered-font-fallback-v1";
-const LIBASS_PATCHES: &[&str] =
-    &["third_party/patches/libass-0.17.5/0001-erika-ordered-default-font-families.patch"];
-
-const HARFBUZZ_ARCHIVE: &str = "harfbuzz-14.2.1.tar.xz";
-const HARFBUZZ_DIR: &str = "harfbuzz-14.2.1";
-const HARFBUZZ_URLS: &[&str] = &[
-    "https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz",
-    "https://codeload.github.com/harfbuzz/harfbuzz/tar.gz/refs/tags/14.2.1",
-];
-
-const FREETYPE_ARCHIVE: &str = "freetype-VER-2-14-3.tar.gz";
-const FREETYPE_DIR: &str = "freetype-VER-2-14-3";
-const FREETYPE_URLS: &[&str] =
-    &["https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-14-3"];
-
-const FRIBIDI_ARCHIVE: &str = "fribidi-1.0.16.tar.xz";
-const FRIBIDI_DIR: &str = "fribidi-1.0.16";
-const FRIBIDI_URLS: &[&str] = &[
-    "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz",
-    "https://codeload.github.com/fribidi/fribidi/tar.gz/refs/tags/v1.0.16",
-];
 
 const ZLIB_ARCHIVE: &str = "zlib-1.3.2.tar.gz";
 const ZLIB_DIR: &str = "zlib-1.3.2";
@@ -231,10 +197,10 @@ impl NativeDependencyProfile {
                 "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf",
                 "--enable-bsf=extract_extradata",
-                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub",
-                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
+                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
+                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
             Self::GplFull => &[
                 "--enable-gpl",
@@ -248,10 +214,10 @@ impl NativeDependencyProfile {
                 "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf",
                 "--enable-bsf=extract_extradata",
-                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub",
-                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le,ass,srt,webvtt,pgssub,dvdsub,dvbsub",
+                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
+                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
         }
     }
@@ -598,8 +564,7 @@ impl DepsOptions {
                     index += 1;
                 }
                 "--all" => {
-                    options.all = true;
-                    index += 1;
+                    bail!("--all was removed with the subtitle/danmaku dependency stack");
                 }
                 "--jobs" => {
                     let value = args.get(index + 1).context("--jobs requires a value")?;
@@ -630,22 +595,6 @@ struct WorkspaceLayout {
     dav1d_build_dir: PathBuf,
     dav1d_build_marker: PathBuf,
     dav1d_prefix: PathBuf,
-    libass_source_dir: PathBuf,
-    libass_build_dir: PathBuf,
-    libass_build_marker: PathBuf,
-    libass_prefix: PathBuf,
-    harfbuzz_source_dir: PathBuf,
-    harfbuzz_build_dir: PathBuf,
-    harfbuzz_build_marker: PathBuf,
-    harfbuzz_prefix: PathBuf,
-    freetype_source_dir: PathBuf,
-    freetype_build_dir: PathBuf,
-    freetype_build_marker: PathBuf,
-    freetype_prefix: PathBuf,
-    fribidi_source_dir: PathBuf,
-    fribidi_build_dir: PathBuf,
-    fribidi_build_marker: PathBuf,
-    fribidi_prefix: PathBuf,
     zlib_source_dir: PathBuf,
     zlib_build_dir: PathBuf,
     zlib_build_marker: PathBuf,
@@ -683,22 +632,6 @@ fn workspace_layout(
     let dav1d_build_dir = build_dir.join("dav1d");
     let dav1d_build_marker = dav1d_build_dir.join("dav1d-built.txt");
     let dav1d_prefix = dist_dir.join("dav1d");
-    let libass_source_dir = source_dir.join(LIBASS_DIR);
-    let libass_build_dir = build_dir.join("libass");
-    let libass_build_marker = libass_build_dir.join("libass-built.txt");
-    let libass_prefix = dist_dir.join("libass");
-    let harfbuzz_source_dir = source_dir.join(HARFBUZZ_DIR);
-    let harfbuzz_build_dir = build_dir.join("harfbuzz");
-    let harfbuzz_build_marker = harfbuzz_build_dir.join("harfbuzz-built.txt");
-    let harfbuzz_prefix = dist_dir.join("harfbuzz");
-    let freetype_source_dir = source_dir.join(FREETYPE_DIR);
-    let freetype_build_dir = build_dir.join("freetype");
-    let freetype_build_marker = freetype_build_dir.join("freetype-built.txt");
-    let freetype_prefix = dist_dir.join("freetype");
-    let fribidi_source_dir = source_dir.join(FRIBIDI_DIR);
-    let fribidi_build_dir = build_dir.join("fribidi");
-    let fribidi_build_marker = fribidi_build_dir.join("fribidi-built.txt");
-    let fribidi_prefix = dist_dir.join("fribidi");
     let zlib_source_dir = source_dir.join(ZLIB_DIR);
     let zlib_build_dir = build_dir.join("zlib");
     let zlib_build_marker = zlib_build_dir.join("zlib-built.txt");
@@ -719,22 +652,6 @@ fn workspace_layout(
         dav1d_build_dir,
         dav1d_build_marker,
         dav1d_prefix,
-        libass_source_dir,
-        libass_build_dir,
-        libass_build_marker,
-        libass_prefix,
-        harfbuzz_source_dir,
-        harfbuzz_build_dir,
-        harfbuzz_build_marker,
-        harfbuzz_prefix,
-        freetype_source_dir,
-        freetype_build_dir,
-        freetype_build_marker,
-        freetype_prefix,
-        fribidi_source_dir,
-        fribidi_build_dir,
-        fribidi_build_marker,
-        fribidi_prefix,
         zlib_source_dir,
         zlib_build_dir,
         zlib_build_marker,
@@ -761,18 +678,12 @@ fn print_dependency_plan(profile: NativeDependencyProfile, target: NativeTarget)
     if target.uses_dav1d() {
         println!("dav1d: {DAV1D_VERSION} ({})", DAV1D_URLS[0]);
     }
-    println!("libass: {LIBASS_VERSION} ({})", LIBASS_URLS[0]);
-    println!("harfbuzz: {HARFBUZZ_VERSION} ({})", HARFBUZZ_URLS[0]);
-    println!("freetype: {FREETYPE_VERSION} ({})", FREETYPE_URLS[0]);
-    println!("fribidi: {FRIBIDI_VERSION} ({})", FRIBIDI_URLS[0]);
     println!("zlib: {ZLIB_VERSION} ({})", ZLIB_URLS[0]);
     println!("ffmpeg configure flags:");
     for flag in profile.ffmpeg_configure_flags_for_target(target) {
         println!("  {flag}");
     }
-    println!(
-        "text/subtitle dependencies are source-fetched in v0 and linked when libass rendering lands"
-    );
+    println!("subtitle and danmaku dependencies are excluded from this AV1/AVIF profile");
 }
 
 fn fetch_dependency_sources(layout: &WorkspaceLayout, all: bool) -> Result<()> {
@@ -793,17 +704,7 @@ fn fetch_dependency_sources(layout: &WorkspaceLayout, all: bool) -> Result<()> {
     if layout.target.uses_dav1d() {
         fetch_and_extract(layout, DAV1D_URLS, DAV1D_ARCHIVE, DAV1D_DIR, None)?;
     }
-    if all {
-        fetch_and_extract(layout, LIBASS_URLS, LIBASS_ARCHIVE, LIBASS_DIR, None)?;
-        apply_libass_patches(layout)?;
-        fetch_and_extract(layout, HARFBUZZ_URLS, HARFBUZZ_ARCHIVE, HARFBUZZ_DIR, None)?;
-        fetch_and_extract(layout, FREETYPE_URLS, FREETYPE_ARCHIVE, FREETYPE_DIR, None)?;
-        fetch_and_extract(layout, FRIBIDI_URLS, FRIBIDI_ARCHIVE, FRIBIDI_DIR, None)?;
-    } else {
-        println!(
-            "skip text/subtitle source fetch; pass --all when preparing libass/HarfBuzz/FreeType work"
-        );
-    }
+    let _ = all;
     Ok(())
 }
 
@@ -817,9 +718,6 @@ fn build_dependencies(options: DepsOptions) -> Result<()> {
         build_dav1d(&layout, options)?;
     }
     build_ffmpeg(&layout, options)?;
-    if options.all {
-        build_text_dependencies(&layout, options)?;
-    }
     write_profile_metadata(&layout, options.profile, options.target)?;
     println!(
         "\nNative dependencies are ready at {}",
@@ -862,44 +760,6 @@ fn print_dependency_status(layout: &WorkspaceLayout) -> Result<()> {
             native_static_lib_exists(&layout.zlib_prefix, "z")
                 || native_static_lib_exists(&layout.zlib_prefix, "zlib")
         )
-    );
-    println!(
-        "libass source: {}",
-        status_word(layout.libass_source_dir.exists())
-    );
-    println!(
-        "harfbuzz source: {}",
-        status_word(layout.harfbuzz_source_dir.exists())
-    );
-    println!(
-        "freetype source: {}",
-        status_word(layout.freetype_source_dir.exists())
-    );
-    println!(
-        "fribidi source: {}",
-        status_word(layout.fribidi_source_dir.exists())
-    );
-    println!(
-        "freetype dist: {}",
-        status_word(native_static_lib_exists(
-            &layout.freetype_prefix,
-            "freetype"
-        ))
-    );
-    println!(
-        "harfbuzz dist: {}",
-        status_word(native_static_lib_exists(
-            &layout.harfbuzz_prefix,
-            "harfbuzz"
-        ))
-    );
-    println!(
-        "fribidi dist: {}",
-        status_word(native_static_lib_exists(&layout.fribidi_prefix, "fribidi"))
-    );
-    println!(
-        "libass dist: {}",
-        status_word(native_static_lib_exists(&layout.libass_prefix, "ass"))
     );
     if layout.dist_dir.join("erika-native-deps.txt").exists() {
         println!(
@@ -1045,14 +905,6 @@ fn ensure_required_tools(options: DepsOptions, layout: &WorkspaceLayout) -> Resu
     if python_tool().is_none() {
         bail!("required Python with venv support was not found in PATH");
     }
-    Ok(())
-}
-
-fn build_text_dependencies(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    build_freetype(layout, options)?;
-    build_harfbuzz(layout, options)?;
-    build_fribidi(layout, options)?;
-    build_libass(layout, options)?;
     Ok(())
 }
 
@@ -1263,304 +1115,6 @@ fn ffmpeg_requires_nasm(target: NativeTarget) -> bool {
     ) || (matches!(target, NativeTarget::Host) && cfg!(target_arch = "x86_64"))
 }
 
-fn build_freetype(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    if marker_has_version(
-        &layout.freetype_build_marker,
-        "freetype",
-        FREETYPE_VERSION,
-        options.target,
-    ) && !options.force
-    {
-        println!(
-            "reuse FreeType build marker {}",
-            layout.freetype_build_marker.display()
-        );
-        return Ok(());
-    }
-    reset_build_and_prefix(&layout.freetype_build_dir, &layout.freetype_prefix)?;
-    fs::create_dir_all(&layout.freetype_build_dir)
-        .with_context(|| format!("create {}", layout.freetype_build_dir.display()))?;
-    fs::create_dir_all(&layout.freetype_prefix)
-        .with_context(|| format!("create {}", layout.freetype_prefix.display()))?;
-
-    println!("configure FreeType");
-    let mut configure = cmake_command(options.target)?;
-    configure
-        .arg("-S")
-        .arg(&layout.freetype_source_dir)
-        .arg("-B")
-        .arg(&layout.freetype_build_dir)
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg(format!(
-            "-DCMAKE_INSTALL_PREFIX={}",
-            layout.freetype_prefix.display()
-        ))
-        .arg("-DFT_DISABLE_ZLIB=TRUE")
-        .arg("-DFT_DISABLE_BZIP2=TRUE")
-        .arg("-DFT_DISABLE_PNG=TRUE")
-        .arg("-DFT_DISABLE_HARFBUZZ=TRUE")
-        .arg("-DFT_DISABLE_BROTLI=TRUE");
-    apply_cmake_target(&mut configure, options.target)?;
-    run(&mut configure)?;
-    cmake_build_install(&layout.freetype_build_dir, options.jobs, options.target)?;
-    write_marker(
-        &layout.freetype_build_marker,
-        "freetype",
-        FREETYPE_VERSION,
-        &layout.freetype_prefix,
-        options.target,
-    )
-}
-
-fn build_harfbuzz(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    if marker_has_version(
-        &layout.harfbuzz_build_marker,
-        "harfbuzz",
-        HARFBUZZ_VERSION,
-        options.target,
-    ) && !options.force
-    {
-        println!(
-            "reuse HarfBuzz build marker {}",
-            layout.harfbuzz_build_marker.display()
-        );
-        return Ok(());
-    }
-    reset_build_and_prefix(&layout.harfbuzz_build_dir, &layout.harfbuzz_prefix)?;
-    fs::create_dir_all(&layout.harfbuzz_build_dir)
-        .with_context(|| format!("create {}", layout.harfbuzz_build_dir.display()))?;
-    fs::create_dir_all(&layout.harfbuzz_prefix)
-        .with_context(|| format!("create {}", layout.harfbuzz_prefix.display()))?;
-
-    println!("configure HarfBuzz");
-    let mut configure = cmake_command(options.target)?;
-    configure
-        .arg("-S")
-        .arg(&layout.harfbuzz_source_dir)
-        .arg("-B")
-        .arg(&layout.harfbuzz_build_dir)
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg(format!(
-            "-DCMAKE_INSTALL_PREFIX={}",
-            layout.harfbuzz_prefix.display()
-        ))
-        .arg("-DHB_HAVE_FREETYPE=OFF")
-        .arg("-DHB_HAVE_GLIB=OFF")
-        .arg("-DHB_HAVE_GOBJECT=OFF")
-        .arg("-DHB_HAVE_ICU=OFF")
-        .arg("-DHB_HAVE_CAIRO=OFF")
-        .arg("-DHB_BUILD_UTILS=OFF")
-        .arg("-DHB_BUILD_SUBSET=OFF");
-    if options.target.is_windows() {
-        configure
-            .arg("-DHB_HAVE_CORETEXT=OFF")
-            .arg("-DHB_HAVE_DIRECTWRITE=ON");
-    } else if options.target.is_apple() {
-        configure
-            .arg("-DHB_HAVE_CORETEXT=ON")
-            .arg("-DHB_HAVE_DIRECTWRITE=OFF");
-    } else {
-        configure
-            .arg("-DHB_HAVE_CORETEXT=OFF")
-            .arg("-DHB_HAVE_DIRECTWRITE=OFF");
-    }
-    apply_cmake_target(&mut configure, options.target)?;
-    run(&mut configure)?;
-    cmake_build_install(&layout.harfbuzz_build_dir, options.jobs, options.target)?;
-    write_marker(
-        &layout.harfbuzz_build_marker,
-        "harfbuzz",
-        HARFBUZZ_VERSION,
-        &layout.harfbuzz_prefix,
-        options.target,
-    )
-}
-
-fn build_fribidi(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    if marker_has_version(
-        &layout.fribidi_build_marker,
-        "fribidi",
-        FRIBIDI_VERSION,
-        options.target,
-    ) && !options.force
-    {
-        println!(
-            "reuse FriBidi build marker {}",
-            layout.fribidi_build_marker.display()
-        );
-        ensure_windows_link_aliases(
-            options.target,
-            &layout.fribidi_prefix,
-            &[("libfribidi.a", "fribidi.lib")],
-        )?;
-        return Ok(());
-    }
-    patch_fribidi_meson_native_compiler(layout)?;
-    let meson = ensure_meson_tools(layout)?;
-    reset_build_and_prefix(&layout.fribidi_build_dir, &layout.fribidi_prefix)?;
-    fs::create_dir_all(&layout.fribidi_prefix)
-        .with_context(|| format!("create {}", layout.fribidi_prefix.display()))?;
-    println!("configure FriBidi");
-    let mut setup = meson_command(&meson);
-    setup
-        .arg("setup")
-        .arg(&layout.fribidi_build_dir)
-        .arg(&layout.fribidi_source_dir)
-        .arg(format!("--prefix={}", layout.fribidi_prefix.display()))
-        .arg("--default-library=static")
-        .arg("--buildtype=release")
-        .arg("-Ddocs=false")
-        .arg("-Dtests=false");
-    apply_meson_target(&mut setup, layout, options.target, "fribidi")?;
-    apply_windows_target_env(&mut setup, options.target)?;
-    run(&mut setup)?;
-    meson_compile_install(
-        &meson,
-        &layout.fribidi_build_dir,
-        options.jobs,
-        options.target,
-    )?;
-    ensure_windows_link_aliases(
-        options.target,
-        &layout.fribidi_prefix,
-        &[("libfribidi.a", "fribidi.lib")],
-    )?;
-    write_marker(
-        &layout.fribidi_build_marker,
-        "fribidi",
-        FRIBIDI_VERSION,
-        &layout.fribidi_prefix,
-        options.target,
-    )
-}
-
-fn patch_fribidi_meson_native_compiler(layout: &WorkspaceLayout) -> Result<()> {
-    let path = layout.fribidi_source_dir.join("gen.tab/meson.build");
-    let contents = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let original = "native_cc = meson.get_compiler('c')";
-    let replacement = "native_cc = meson.get_compiler('c', native: true)";
-    if contents.contains(replacement) {
-        return Ok(());
-    }
-    if !contents.contains(original) {
-        bail!(
-            "FriBidi native compiler declaration was not found in {}; update the Erika patch for this FriBidi version",
-            path.display()
-        );
-    }
-    fs::write(&path, contents.replacen(original, replacement, 1))
-        .with_context(|| format!("patch {}", path.display()))?;
-    println!("patched FriBidi Meson generators to probe headers with the build-machine compiler");
-    Ok(())
-}
-
-fn build_libass(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
-    if marker_has_version(
-        &layout.libass_build_marker,
-        "libass",
-        LIBASS_BUILD_VERSION,
-        options.target,
-    ) && !options.force
-    {
-        println!(
-            "reuse libass build marker {}",
-            layout.libass_build_marker.display()
-        );
-        ensure_windows_link_aliases(
-            options.target,
-            &layout.libass_prefix,
-            &[("libass.a", "ass.lib")],
-        )?;
-        return Ok(());
-    }
-    let meson = ensure_meson_tools(layout)?;
-    reset_build_and_prefix(&layout.libass_build_dir, &layout.libass_prefix)?;
-    fs::create_dir_all(&layout.libass_prefix)
-        .with_context(|| format!("create {}", layout.libass_prefix.display()))?;
-
-    let pkg_config_path = pkg_config_path([
-        &layout.freetype_prefix,
-        &layout.harfbuzz_prefix,
-        &layout.fribidi_prefix,
-    ]);
-    let pkg_config = ensure_pkg_config_shim(layout)?;
-    println!("configure libass");
-    let mut setup = meson_command(&meson);
-    setup
-        .arg("setup")
-        .arg(&layout.libass_build_dir)
-        .arg(&layout.libass_source_dir)
-        .arg(format!("--prefix={}", layout.libass_prefix.display()))
-        .arg("--default-library=static")
-        .arg("--buildtype=release")
-        .arg("-Dtest=disabled")
-        .arg("-Dprofile=disabled")
-        .arg("-Dfontconfig=disabled")
-        .arg("-Dasm=disabled")
-        .arg("-Dlibunibreak=disabled")
-        .env("PKG_CONFIG_PATH", &pkg_config_path)
-        .env("PKG_CONFIG", &pkg_config)
-        .env("ERIKA_PKG_CONFIG_RELATIVE_BASE", &layout.libass_build_dir);
-    if options.target.is_windows() {
-        setup
-            .arg("-Dcoretext=disabled")
-            .arg("-Ddirectwrite=enabled");
-    } else if options.target.is_apple() {
-        setup
-            .arg("-Dcoretext=enabled")
-            .arg("-Ddirectwrite=disabled");
-    } else {
-        setup
-            .arg("-Dcoretext=disabled")
-            .arg("-Ddirectwrite=disabled")
-            .arg("-Drequire-system-font-provider=false");
-    }
-    apply_meson_target(&mut setup, layout, options.target, "libass")?;
-    apply_windows_target_env(&mut setup, options.target)?;
-    run(&mut setup)?;
-
-    let mut compile = meson_command(&meson);
-    compile
-        .arg("compile")
-        .arg("-C")
-        .arg(&layout.libass_build_dir)
-        .env("PKG_CONFIG_PATH", &pkg_config_path)
-        .env("PKG_CONFIG", &pkg_config)
-        .env("ERIKA_PKG_CONFIG_RELATIVE_BASE", &layout.libass_build_dir);
-    if let Some(jobs) = options.jobs {
-        compile.arg(format!("-j{jobs}"));
-    }
-    apply_windows_target_env(&mut compile, options.target)?;
-    apply_android_host_env(&mut compile, options.target)?;
-    run(&mut compile)?;
-    let mut install = meson_command(&meson);
-    install
-        .arg("install")
-        .arg("-C")
-        .arg(&layout.libass_build_dir)
-        .env("PKG_CONFIG_PATH", &pkg_config_path)
-        .env("PKG_CONFIG", &pkg_config)
-        .env("ERIKA_PKG_CONFIG_RELATIVE_BASE", &layout.libass_build_dir);
-    apply_windows_target_env(&mut install, options.target)?;
-    apply_android_host_env(&mut install, options.target)?;
-    run(&mut install)?;
-    ensure_windows_link_aliases(
-        options.target,
-        &layout.libass_prefix,
-        &[("libass.a", "ass.lib")],
-    )?;
-
-    write_marker(
-        &layout.libass_build_marker,
-        "libass",
-        LIBASS_BUILD_VERSION,
-        &layout.libass_prefix,
-        options.target,
-    )
-}
-
 fn cmake_build_install(
     build_dir: &std::path::Path,
     jobs: Option<usize>,
@@ -1722,10 +1276,9 @@ fn apply_meson_target(
         return Ok(());
     };
     command.arg("--cross-file").arg(cross_file);
-    // Cross builds (e.g. iOS) compile native generator tools such as FriBidi's
-    // gen.tab on the build machine. Provide an explicit build-machine compiler
-    // pinned to the macOS SDK so the iOS SDKROOT we export below does not make
-    // those native tools target iOS and fail to run.
+    // Cross builds may compile native generator tools on the build machine.
+    // Provide an explicit build-machine compiler pinned to the macOS SDK so
+    // the iOS SDKROOT exported below cannot retarget those tools to iOS.
     let native_file = meson_native_file(layout, target, name)?;
     command.arg("--native-file").arg(native_file);
     apply_apple_target_env(command, target)?;
@@ -2017,17 +1570,6 @@ fn native_deployment_target(target: NativeTarget) -> String {
         .unwrap_or_else(|| "n/a".to_string())
 }
 
-fn pkg_config_path<'a>(prefixes: impl IntoIterator<Item = &'a PathBuf>) -> String {
-    env::join_paths(
-        prefixes
-            .into_iter()
-            .map(|prefix| prefix.join("lib/pkgconfig")),
-    )
-    .expect("pkg-config path entries are valid")
-    .to_string_lossy()
-    .into_owned()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UnifiedPatchHunk {
     old_start: usize,
@@ -2100,40 +1642,6 @@ fn apply_ffmpeg_patch_files(layout: &WorkspaceLayout) -> Result<PatchApplication
         }
     }
     Ok(application)
-}
-
-fn apply_libass_patches(layout: &WorkspaceLayout) -> Result<()> {
-    let mut application = PatchApplication::AlreadyApplied;
-    for relative_path in LIBASS_PATCHES {
-        let patch_path = layout.root.join(relative_path);
-        let patch = fs::read_to_string(&patch_path)
-            .with_context(|| format!("read libass patch {}", patch_path.display()))?;
-        if apply_unified_patch(&layout.libass_source_dir, &patch)
-            .with_context(|| format!("apply libass patch {}", patch_path.display()))?
-            == PatchApplication::Applied
-        {
-            application = PatchApplication::Applied;
-        }
-    }
-    fs::write(
-        layout.libass_source_dir.join(".erika-patchset"),
-        format!("{LIBASS_PATCHSET_VERSION}\n"),
-    )
-    .with_context(|| {
-        format!(
-            "write libass patch stamp in {}",
-            layout.libass_source_dir.display()
-        )
-    })?;
-    match application {
-        PatchApplication::Applied => {
-            println!("applied libass patch set {LIBASS_PATCHSET_VERSION}")
-        }
-        PatchApplication::AlreadyApplied => {
-            println!("reuse libass patch set {LIBASS_PATCHSET_VERSION}")
-        }
-    }
-    Ok(())
 }
 
 fn refresh_ffmpeg_source(layout: &WorkspaceLayout) -> Result<()> {
@@ -3522,7 +3030,7 @@ fn write_profile_metadata(
     fs::write(
         layout.dist_dir.join("erika-native-deps.txt"),
         format!(
-            "profile={}\ntarget={}\nandroid_api={}\nffmpeg={}\nffmpeg_patchset={}\nffmpeg_dist={}\ndav1d={}\ndav1d_dist={}\nzlib={}\nzlib_dist={}\nlibass={}\nlibass_source={}\nharfbuzz={}\nharfbuzz_source={}\nfreetype={}\nfreetype_source={}\nfribidi={}\nfribidi_source={}\n",
+            "profile={}\ntarget={}\nandroid_api={}\nffmpeg={}\nffmpeg_patchset={}\nffmpeg_dist={}\ndav1d={}\ndav1d_dist={}\nzlib={}\nzlib_dist={}\nsubtitles=disabled\ndanmaku=disabled\n",
             profile_name(profile),
             target.triple().unwrap_or("host"),
             if target.is_android() {
@@ -3544,15 +3052,7 @@ fn write_profile_metadata(
                 "n/a".to_string()
             },
             ZLIB_VERSION,
-            layout.zlib_prefix.display(),
-            LIBASS_VERSION,
-            source_state(&layout.libass_source_dir),
-            HARFBUZZ_VERSION,
-            source_state(&layout.harfbuzz_source_dir),
-            FREETYPE_VERSION,
-            source_state(&layout.freetype_source_dir),
-            FRIBIDI_VERSION,
-            source_state(&layout.fribidi_source_dir)
+            layout.zlib_prefix.display()
         ),
     )
     .with_context(|| format!("write metadata in {}", layout.dist_dir.display()))?;
@@ -3618,10 +3118,6 @@ fn default_job_count() -> usize {
 
 fn status_word(ok: bool) -> &'static str {
     if ok { "ready" } else { "missing" }
-}
-
-fn source_state(path: &std::path::Path) -> &'static str {
-    status_word(path.exists())
 }
 
 fn native_static_lib_exists(prefix: &Path, name: &str) -> bool {
@@ -3765,7 +3261,7 @@ fn ensure_pkg_config_shim(layout: &WorkspaceLayout) -> Result<PathBuf> {
              setlocal\r\n\
              for %%I in (\"%~dp0{}\") do set \"ERIKA_ROOT=%%~fI\"\r\n\
              set \"ERIKA_DIST_DIR=%ERIKA_ROOT%\\{}\"\r\n\
-             set \"ERIKA_PKG_CONFIG_PATH=%ERIKA_DIST_DIR%\\dav1d\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\ffmpeg\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\freetype\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\harfbuzz\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\fribidi\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\libass\\lib\\pkgconfig\"\r\n\
+             set \"ERIKA_PKG_CONFIG_PATH=%ERIKA_DIST_DIR%\\dav1d\\lib\\pkgconfig;%ERIKA_DIST_DIR%\\ffmpeg\\lib\\pkgconfig\"\r\n\
              if defined PKG_CONFIG_PATH (\r\n\
              \tset \"PKG_CONFIG_PATH=%ERIKA_PKG_CONFIG_PATH%;%PKG_CONFIG_PATH%\"\r\n\
              ) else (\r\n\
@@ -4960,11 +4456,11 @@ mod tests {
         ] {
             let flags = profile.ffmpeg_configure_flags();
             assert!(flags.contains(&"--disable-everything"));
-            assert!(flags.contains(&"--enable-demuxer=mov,matroska,av1,obu,ivf,ass,srt,webvtt"));
+            assert!(flags.contains(&"--enable-demuxer=mov,matroska,av1,obu,ivf"));
             assert!(flags.contains(&"--enable-bsf=extract_extradata"));
-            assert!(flags.contains(
-                &"--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio,dvdsub,dvbsub"
-            ));
+            assert!(
+                flags.contains(&"--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio")
+            );
 
             let decoders = flags
                 .iter()
@@ -4984,6 +4480,12 @@ mod tests {
                 "mjpeg",
                 "flv",
                 "theora",
+                "ass",
+                "srt",
+                "webvtt",
+                "pgssub",
+                "dvdsub",
+                "dvbsub",
             ] {
                 assert!(
                     !decoders.contains(forbidden),
@@ -5338,7 +4840,7 @@ mod tests {
 fn print_help() {
     println!("Erika xtask");
     println!("  cargo run -p xtask -- deps plan --profile lgpl");
-    println!("  cargo run -p xtask -- deps fetch --profile lgpl [--all]");
+    println!("  cargo run -p xtask -- deps fetch --profile lgpl");
     println!("  cargo run -p xtask -- deps status --profile lgpl");
     println!(
         "  cargo run -p xtask -- deps build --profile lgpl [--target host|aarch64-apple-darwin|x86_64-apple-darwin|aarch64-apple-ios|aarch64-apple-ios-sim|x86_64-apple-ios|aarch64-apple-tvos|aarch64-apple-tvos-sim|x86_64-apple-tvos|x86_64-pc-windows-msvc|aarch64-pc-windows-msvc|aarch64-linux-android|armv7-linux-androideabi|x86_64-linux-android|i686-linux-android] [--force] [--jobs N]"

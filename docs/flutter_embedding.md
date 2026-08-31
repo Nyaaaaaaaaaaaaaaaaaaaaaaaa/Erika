@@ -1,5 +1,9 @@
 # Flutter Embedding
 
+> **AV1/AVIF fork:** subtitle and danmaku features documented in legacy API
+> examples below are compatibility-only and return an unsupported error. They
+> are not included in the native runtime.
+
 [中文](flutter_embedding.zh.md) | [English](flutter_embedding.md) | [日本語](flutter_embedding.ja.md)
 
 Erika is not a Flutter video renderer. Flutter is an optional host UI.

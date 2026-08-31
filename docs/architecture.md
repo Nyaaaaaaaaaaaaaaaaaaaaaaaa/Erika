@@ -4,8 +4,8 @@
 
 Erika is an embeddable Rust media playback library. Host applications call into
 the engine through the Rust API, a C ABI (`erika_capi`), or Flutter bindings
-(`erika_flutter`). Video frames, subtitles, and danmaku stay inside the engine
-and are composited in the renderer — they do not flow through the host.
+(`erika_flutter`). Video frames and the optional diagnostic HUD stay inside the
+engine and are composited in the renderer — they do not flow through the host.
 
 ## System Overview
 
@@ -16,7 +16,7 @@ Rust Player Core
   playback engine ────── video/audio tick, clock, frame scheduler
   AV1 decode ─────────── VideoToolbox, D3D11VA/DXVA2, MediaCodec, software fallback
   audio output ───────── CoreAudio, AudioQueue, WASAPI, AAudio, OHAudio, ring buffer
-  overlay timeline ───── subtitle + danmaku composition
+  debug HUD ──────── optional ASCII diagnostic overlay
   renderer core ──────── color state, render graph, tone map, scaler policy
   Metal renderer ─────── zero-copy NV12/P010, HDR/EDR, subtitle/danmaku pass
   D3D11 renderer ─────── zero-copy D3D11VA, HDR10, subtitle/danmaku pass (Windows)
@@ -35,16 +35,12 @@ sources into `third_party/`. The default profile is `lgpl`.
 |------------|---------|---------|
 | FFmpeg | 8.1.2 | Demux, decode, audio resample, platform hardware decode |
 | dav1d | 1.5.1 | AV1 software fallback on every target (8-bit and high bit depth) |
-| libass | 0.17.5 | ASS subtitle rendering |
-| FreeType | 2.14.3 | Font rasterization (libass dependency) |
-| HarfBuzz | 14.2.1 | Text shaping (libass dependency) |
-| FriBidi | 1.0.16 | Bidirectional text (libass dependency) |
+| zlib | 1.3.2 | Container decompression support used by FFmpeg |
 
-All dependencies are statically linked. libass and its dependencies are enabled
-by default (`features = ["libass"]`).
+All native dependencies are statically linked.
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl
+cargo run -p xtask -- deps build --profile lgpl
 cargo run -p xtask -- deps status
 ```
 
@@ -63,7 +59,6 @@ cargo run -p xtask -- deps status
   renderer's platform-specific import or upload path.
 - **AudioResampler** — wraps `libswresample`, converts to interleaved f32 PCM
   (default 48 kHz stereo).
-- **SubtitleDecoder** — decodes embedded text and bitmap subtitle streams.
 
 ## Playback Engine
 
@@ -72,9 +67,9 @@ produces video frames and PCM audio blocks.
 
 After probe and before decoder creation, the session requires an AV1 visual
 track. Dynamic AV1 is accepted in MP4/MOV, Matroska/WebM, IVF, and raw AV1;
-AVIF is accepted as one static primary image. Audio/subtitles/danmaku are
-ancillary only. Non-AV1 visuals and audio-only media fail through the existing
-error channel with the supported scope in the message.
+AVIF is accepted as one static primary image. Audio is ancillary only.
+Subtitles and danmaku are removed. Non-AV1 visuals and audio-only media fail
+through the existing error channel with the supported scope in the message.
 
 Decoder availability is a session invariant: when a video track is selected,
 the play, seek, and video-frame-pump entry points require an active video
@@ -105,41 +100,17 @@ enter an audio-only false `Playing` state.
 
 ## Subtitle System
 
-- **Parsing**: SRT, WebVTT, ASS timeline parsing. Embedded and external subtitle
-  tracks. External tracks can be added/removed at runtime.
-- **libass renderer**: Statically linked, enabled by default. Accepts ASS
-  scripts, calls `ass_render_frame`, imports alpha planes into Erika's overlay
-  system. macOS uses the CoreText font provider and Windows DirectWrite; every
-  other target runs without a system font provider (the vendored libass build
-  disables fontconfig), so Erika's bundled Droid Sans Fallback — registered as
-  an in-memory font on all platforms — is the family libass resolves by default.
-- **Subtitle style**: A custom font family and font file, colours, metrics
-  (size, outline, shadow, blur, spacing, scale), attributes, border style,
-  alignment and margins act as fallbacks that fill in what a script leaves
-  open, plus the styling of plain-text subtitles; the subtitle scale multiplies
-  the metrics. An `override_mask` promotes chosen fields to libass' selective
-  style override so they also replace what ASS dialogue events request, with the
-  override metrics renormalized so they land on the same pixels whatever
-  `PlayResY` a script declares.
-- **SubtitleRendererCore**: Renderer-facing boundary that tracks changed/unchanged
-  frames to avoid redundant GPU uploads.
+Removed from the specialized runtime. Legacy C ABI entry points remain as
+link-compatible shells and return `PlayerError` with an explicit unsupported
+message. No subtitle demuxers, decoders, charset conversion, fonts, or libass
+dependencies are built.
 
 ## Danmaku System
 
-The danmaku subsystem implements the NipaPlay DFM+ layout algorithm natively in
-Rust. See `docs/danmaku_architecture.md` for the full design.
-
-- **Input**: Bilibili XML, JSON, JSON-lines parsing.
-- **DanmakuSession**: Multi-track management with per-track enable/disable,
-  per-track offset, global offset.
-- **DFM+ layout core**: Prepare/frame-query separation. Prepare processes the
-  entire track once (measurement, filtering, duplicate merge, collision avoidance,
-  lane allocation). Frame query returns positioned items for a given media time.
-- **Text rasterizer**: Glyph atlas with fill and outline alpha masks, version
-  tracking for GPU texture reuse.
-- **Render plan**: `DanmakuRenderPlan` carries glyph instances with screen rects,
-  atlas tex rects, colors, outline, shadow. Metal and wgpu renderers draw
-  instanced quads from the atlas.
+Removed from the specialized runtime. Legacy C ABI entry points remain as
+link-compatible shells and return `PlayerError`; the XML/JSON parser, DFM
+layout engine, font fallback, glyph atlas, examples, and architecture documents
+are not included.
 
 ## Renderer
 
@@ -166,8 +137,7 @@ The primary renderer for Apple platforms:
   Blob validation, model layout, execution policy, and frame-token caching live
   in the backend-neutral `renderer/artcnn.rs` module and are also consumed by
   the wgpu implementation.
-- Subtitle overlay: RGBA plane upload and alpha blending.
-- Danmaku: Instanced glyph quad drawing from atlas (shadow → outline → fill passes).
+- Optional diagnostic HUD: RGBA plane upload and alpha blending.
 - Presentation layout preserves source aspect ratio.
 
 ### Direct3D 11 Renderer (Windows)
@@ -185,8 +155,7 @@ The native renderer for Windows (`renderer/d3d11.rs`):
   level 11.0 or after an optional compute failure.
 - HDR10 output via an `R10G10B10A2_UNORM` swapchain with `DXGI_HDR_METADATA_HDR10`,
   with SDR (`BGRA8`) fallback.
-- Subtitle overlay alpha-atlas upload and blending; instanced danmaku glyph
-  quad drawing from the atlas.
+- Optional diagnostic HUD upload and alpha blending.
 - Window-hosted swapchain driven by `render_tick`.
 
 ### wgpu Renderer (cross-platform)
@@ -210,7 +179,7 @@ Second renderer backend for portability:
   both native luma planes and Android's converted nonlinear RGB texture while
   preserving chroma as `rgb + (Y_sr - Y)`. GLES 3.0 reports `Inactive` with a
   structured `native_luma_sampling` fallback instead of attempting compute.
-- Subtitle/danmaku compositing, frame capture, and offscreen headless tests.
+- Diagnostic HUD compositing, frame capture, and offscreen headless tests.
   Capture always renders to an SDR RGBA8 target, including when the display
   surface is extended-linear, so screenshots never expose unclamped scRGB
   values as if they were SDR pixels.
@@ -263,18 +232,16 @@ consumes them:
 
 ## Presenter Runtime
 
-`PresenterRuntime` ties together Player, MetalRenderer, OverlayTimeline,
-DanmakuEngine, and audio output. The host supplies a native surface and drives
+`PresenterRuntime` ties together Player, the selected renderer, the diagnostic
+HUD, and audio output. The host supplies a native surface and drives
 `render_tick` from a display timer.
 
-- Pumps video frames, updates overlay (subtitle + danmaku), renders, presents.
+- Pumps video frames, updates the optional diagnostic HUD, renders, presents.
 - Decoder-changing operations use a quiesce/ACK barrier, discard renderer and
   receiver state, perform the transition, then resume. Playback generations
   remain monotonic across reopen and stale import feedback is gated by both
   generation and the exact MediaCodec route.
-- Danmaku plan generation is time-synchronized with video frames using
-  generation + media_time gating.
-- Supports playback rate, volume, track selection, subtitle/danmaku
+- Supports playback rate, volume, audio-track selection, and output
   configuration at runtime.
 
 ## C ABI
@@ -285,11 +252,13 @@ DanmakuEngine, and audio output. The host supplies a native surface and drives
 - **`ErikaPresenterHandle`** — Erika owns the full stack. The host provides a
   surface and calls `render_tick`.
 
-Covers: create/destroy, open/play/pause/stop/seek, track selection, subtitle
-track add/remove, danmaku track management (add/remove/enable/offset/config),
+Covers: create/destroy, open/play/pause/stop/seek, audio-track selection,
 surface attach/detach/resize, event polling, volume, playback rate, neural
 luma upscaler switching, upscaler diagnostics, and the 13-field output status
 snapshot returned by `erika_presenter_get_output_status`.
+
+Legacy subtitle and danmaku symbols remain exported solely for binary/link
+compatibility and return an explicit unsupported `PlayerError`.
 
 Header: `crates/erika_capi/include/erika.h`
 

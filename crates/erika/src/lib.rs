@@ -3,6 +3,7 @@ pub mod android;
 pub mod apple;
 pub mod audio;
 pub mod core;
+#[path = "danmaku_compat.rs"]
 pub mod danmaku;
 pub mod debug_hud;
 pub mod ffmpeg;
@@ -13,7 +14,9 @@ pub mod playback;
 pub mod presenter;
 pub mod renderer;
 pub mod source;
+#[path = "subtitle_compat.rs"]
 pub mod subtitle;
+#[path = "subtitle_charset_compat.rs"]
 pub mod subtitle_charset;
 pub mod text;
 #[cfg(target_os = "windows")]
@@ -21,6 +24,10 @@ pub mod windows;
 
 mod trace;
 
-pub(crate) const NIPAPLAY_FALLBACK_FONT: &[u8] = include_bytes!("../assets/subfont.ttf");
+// Subtitle and danmaku rendering were removed from the AV1/AVIF-specialized
+// runtime. Keep the internal symbol temporarily so the compatibility-only
+// The optional debug HUD keeps a compact ASCII font; subtitle and danmaku
+// rendering cannot use it.
+pub(crate) const NIPAPLAY_FALLBACK_FONT: &[u8] = include_bytes!("../assets/hudfont.ttf");
 
 pub use core::*;

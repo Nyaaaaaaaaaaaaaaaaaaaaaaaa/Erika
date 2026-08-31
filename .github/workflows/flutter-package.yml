@@ -172,7 +172,7 @@ jobs:
           root="$RUNNER_TEMP/erika-tvos"
           mkdir -p "$root/erika_flutter"
           git archive HEAD:packages/erika_flutter | tar -x -C "$root/erika_flutter"
-          cargo run --locked -p xtask -- deps build --all \
+          cargo run --locked -p xtask -- deps build \
             --profile lgpl --target aarch64-apple-tvos-sim
           TVOS_SDKROOT="$(xcrun --sdk appletvsimulator --show-sdk-path)"
           export SDKROOT="$TVOS_SDKROOT"
@@ -182,7 +182,7 @@ jobs:
             cargo +nightly rustc -Z build-std=std,panic_abort --locked \
               -p erika_capi --lib --release \
               --target aarch64-apple-tvos-sim \
-              --no-default-features --features libass --crate-type staticlib
+              --no-default-features --crate-type staticlib
           cp target/aarch64-apple-tvos-sim/release/liberika_capi.a \
             "$root/liberika_capi.a"
           lipo -info "$root/liberika_capi.a" | grep -Eq 'arm64|Non-fat'

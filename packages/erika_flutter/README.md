@@ -1,5 +1,8 @@
 # erika_flutter
 
+> This AV1/AVIF-specialized package does not support subtitles or danmaku.
+> Legacy Dart methods remain temporarily for compatibility and fail explicitly.
+
 Flutter plugin for the Erika media playback engine.
 
 The plugin keeps Dart out of the hot path:

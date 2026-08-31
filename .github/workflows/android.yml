@@ -90,10 +90,10 @@ jobs:
           export "BINDGEN_EXTRA_CLANG_ARGS_${CC_KEY}=--target=${{ matrix.clang_target }}${ANDROID_API_LEVEL} --sysroot=$PREBUILT/sysroot"
           export "CFLAGS_${CC_KEY}=-fPIC" "CXXFLAGS_${CC_KEY}=-fPIC"
           cargo run -p xtask -- deps plan --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
-          cargo run -p xtask -- deps build --all --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
+          cargo run -p xtask -- deps build --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
           ERIKA_NATIVE_TARGET="$T" \
             cargo build -p erika_capi --release --target "$T" \
-              --no-default-features --features libass,wgpu
+              --no-default-features --features wgpu
           mkdir -p "out/android/${{ matrix.abi }}"
           cp "target/$T/release/liberika_capi.a" "out/android/${{ matrix.abi }}/liberika_capi.a"
           cp "target/$T/release/liberika_capi.so" "out/android/${{ matrix.abi }}/liberika_capi.so"

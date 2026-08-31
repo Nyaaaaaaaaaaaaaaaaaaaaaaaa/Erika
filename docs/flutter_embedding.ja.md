@@ -1,5 +1,8 @@
 # Flutter Embedding
 
+> **AV1/AVIF 専用 fork:** 以下の旧 API 例にある subtitle/danmaku は互換用の
+> shell のみで、unsupported error を返します。native runtime に実装は含まれません。
+
 [中文](flutter_embedding.zh.md) | [English](flutter_embedding.md) | [日本語](flutter_embedding.ja.md)
 
 Erika は Flutter の動画レンダラーではありません。Flutter はあくまで任意の host UI です。再生コアが decode、timing、native rendering、字幕、弾幕、音声、HDR presentation を担当します。

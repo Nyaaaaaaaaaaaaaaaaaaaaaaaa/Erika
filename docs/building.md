@@ -2,14 +2,15 @@
 
 > Translations: [中文](building.zh.md) · [日本語](building.ja.md)
 
-Erika is a Rust workspace that links a set of **statically built native
-dependencies** (FFmpeg, dav1d as the AV1 fallback on every target, and optionally
-the libass subtitle stack). Those native libraries are not vendored — you build them once with the `xtask` orchestrator,
+Erika is a Rust workspace that links a minimal set of **statically built native
+dependencies** (FFmpeg, dav1d as the AV1 fallback on every target, and zlib).
+Subtitle and danmaku native dependencies are not part of this fork. The native
+libraries are not vendored — you build them once with the `xtask` orchestrator,
 which stages them under `third_party/dist/`, and the Rust crates link against
 that staging directory.
 
 ```
-xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib,libass,…}
+xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib}
                                         │
                           erika_ffmpeg_sys/build.rs  (auto-discovers dist, runs bindgen)
                                         │
@@ -31,8 +32,7 @@ xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,z
 ### Build tools — macOS / Unix host
 
 `tar`, `make`, `clang`, `cmake`, `pkg-config`, and `python3` (with `venv`) must
-be on `PATH`. Building the full subtitle stack (`--all`) additionally needs
-`meson` and `ninja` (and `nasm` for FFmpeg's x86 assembly on Intel hosts). On
+be on `PATH`; FFmpeg's x86 assembly also needs `nasm` on Intel hosts. On
 macOS, install the Xcode Command Line Tools plus the above via Homebrew.
 
 `erika_ffmpeg_sys` runs **bindgen**, which needs `libclang`. If it is not found
@@ -45,8 +45,6 @@ automatically, set `LIBCLANG_PATH`.
 - A **POSIX shell** (Git for Windows or MSYS2) — FFmpeg's `configure` needs it.
 - **GNU make** (MSYS2 `make` or MinGW `mingw32-make`).
 - `nasm` for FFmpeg assembly.
-- For `--all`: **Python** (with `venv`); `xtask` provisions a `pkg-config` shim
-  automatically.
 
 Run the commands from a shell where the MSVC environment is active (e.g. a
 *"x64 Native Tools Command Prompt"*), so `xtask` can locate the toolchain.
@@ -82,11 +80,8 @@ Erika's Android minimum is API **26**. Override it with
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# Build the baseline set (zlib + FFmpeg; dav1d on Android and Apple targets) — LGPL profile
+# Build the AV1/AVIF native set (zlib + FFmpeg, plus dav1d where used)
 cargo run -p xtask -- deps build --profile lgpl
-
-# Build everything, including the libass subtitle stack
-cargo run -p xtask -- deps build --all --profile lgpl
 ```
 
 Subcommands: `plan` (print the plan), `fetch` (download sources only),
@@ -98,7 +93,6 @@ Subcommands: `plan` (print the plan), `fetch` (download sources only),
 |------|--------|---------|---------|
 | `--profile` | `lgpl`, `gpl-full` | `lgpl` | FFmpeg license profile (see below). |
 | `--target` | see targets table | `host` | Cross-compile target. |
-| `--all` | — | off | Also build libass + FreeType + HarfBuzz + FriBidi (subtitle rendering). The baseline is zlib + FFmpeg, plus dav1d for Android and Apple targets. |
 | `--force` | — | off | Rebuild even if up-to-date markers exist. |
 | `--jobs N` | integer | auto | Parallelism for the native builds. |
 
@@ -155,7 +149,7 @@ repository and therefore also switch to source builds.
 For direct native builds, keep all three target selectors identical:
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-apple-darwin
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-apple-darwin
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-darwin \
   cargo build -p erika_capi --release --target aarch64-apple-darwin
 ```
@@ -165,18 +159,18 @@ Direct tvOS builds use nightly and build the standard library from `rust-src`
 
 ```sh
 rustup toolchain install nightly --component rust-src
-cargo run -p xtask -- deps build --all --profile lgpl \
+cargo run -p xtask -- deps build --profile lgpl \
   --target aarch64-apple-tvos-sim
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-tvos-sim \
   cargo +nightly rustc -Z build-std=std,panic_abort -p erika_capi --release \
-  --target aarch64-apple-tvos-sim --no-default-features --features libass \
+  --target aarch64-apple-tvos-sim --no-default-features \
   --lib --crate-type staticlib
 ```
 
 On Windows ARM64, use the equivalent PowerShell commands:
 
 ```powershell
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-pc-windows-msvc
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-pc-windows-msvc
 $env:ERIKA_NATIVE_PROFILE = "lgpl"
 $env:ERIKA_NATIVE_TARGET = "aarch64-pc-windows-msvc"
 cargo build -p erika_capi --release --target aarch64-pc-windows-msvc
@@ -194,7 +188,7 @@ $env:ANDROID_NDK_ROOT = $env:ANDROID_NDK_HOME
 $env:ANDROID_API_LEVEL = "26"
 
 rustup target add x86_64-linux-android
-cargo run -p xtask -- deps build --all --profile lgpl --target x86_64-linux-android
+cargo run -p xtask -- deps build --profile lgpl --target x86_64-linux-android
 
 $bin = "$env:ANDROID_NDK_HOME\toolchains\llvm\prebuilt\windows-x86_64\bin"
 $prebuilt = Split-Path $bin -Parent
@@ -211,7 +205,7 @@ $env:ERIKA_NATIVE_PROFILE = "lgpl"
 $env:ERIKA_NATIVE_TARGET = "x86_64-linux-android"
 
 cargo build -p erika_capi --release --target x86_64-linux-android `
-  --no-default-features --features libass,wgpu
+  --no-default-features --features wgpu
 ```
 
 Cargo produces both `liberika_capi.so` and `liberika_capi.a` under
@@ -226,7 +220,7 @@ The native build is split into profiles so the license boundary is explicit:
   `--disable-gpl --enable-version3`, static, no network, and file protocol only.
   Its visual decoder/parser allowlist contains AV1 only; demuxers cover
   MP4/MOV/AVIF, Matroska/WebM, IVF, raw AV1, and ASS/SRT/WebVTT. Audio and
-  subtitle decoders are ancillary to AV1 playback. AV1 hardware is enabled only
+  audio decoders are ancillary to AV1 playback. AV1 hardware is enabled only
   through VideoToolbox (Apple), D3D11VA/DXVA2 (Windows), and MediaCodec
   (Android); dav1d is the software fallback on every target, including Windows
   and OpenHarmony.
@@ -248,7 +242,7 @@ third_party/
   build/<target>/<profile>/    out-of-tree build trees
   dist/<target>/<profile>/     install prefixes the crates link:
     ffmpeg/{include,lib}
-    dav1d/   zlib/    libass/    freetype/    harfbuzz/    fribidi/
+    dav1d/   zlib/
 ```
 
 For the `host` target the `<target>` path segment is omitted
@@ -291,7 +285,7 @@ cargo test --workspace               # unit + integration tests
 Android FFmpeg keeps only the AV1 MediaCodec visual decoder enabled. The
 intended hardware path asks MediaCodec for
 software-readable YUV frames and reuses the shared wgpu upload/composition
-pipeline, preserving subtitles, danmaku, and screenshots. This is hardware
+pipeline, preserving screenshots and the diagnostic HUD. This is hardware
 decode with a CPU upload, not a zero-copy Surface path; metrics must report it
 accordingly. If AV1 MediaCodec cannot open or fails while decoding, the software
 path explicitly selects FFmpeg's `libdav1d` decoder. `xtask` builds dav1d 1.5.1

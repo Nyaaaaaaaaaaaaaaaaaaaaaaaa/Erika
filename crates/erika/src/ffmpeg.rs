@@ -35,9 +35,6 @@ use crate::ohos::avcodec::{
 };
 
 const AVERROR_EOF: i32 = -541_478_725;
-const MAX_SUBTITLE_FONT_ATTACHMENTS: usize = 256;
-const MAX_SUBTITLE_FONT_ATTACHMENT_BYTES: usize = 64 * 1024 * 1024;
-const MAX_SUBTITLE_FONT_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 const MAX_ASS_CODEC_PRIVATE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -3618,8 +3615,6 @@ fn inspect_format_context(
     let mut tracks = Vec::with_capacity(stream_count);
     let mut video = Vec::new();
     let mut audio = Vec::new();
-    let mut subtitles = Vec::new();
-    let mut subtitle_fonts = Vec::new();
     let mut stream_time_bases = Vec::with_capacity(stream_count);
 
     for index in 0..stream_count {
@@ -3637,21 +3632,15 @@ fn inspect_format_context(
         }
 
         if unsafe { (*codecpar).codec_type } == sys::AVMediaType_AVMEDIA_TYPE_ATTACHMENT {
-            let accepted_bytes = subtitle_fonts
-                .iter()
-                .map(SubtitleFontAttachment::byte_len)
-                .sum();
-            if let Some(font) = unsafe {
-                subtitle_font_attachment(stream, codecpar, subtitle_fonts.len(), accepted_bytes)
-            } {
-                subtitle_fonts.push(font);
-            }
             continue;
         }
 
         let Some(kind) = (unsafe { track_kind((*codecpar).codec_type) }) else {
             continue;
         };
+        if kind == TrackKind::Subtitle {
+            continue;
+        }
 
         let codec = unsafe { codec_name((*codecpar).codec_id) };
         let mut track = TrackInfo::embedded(unsafe { (*stream).index as i64 }, kind);
@@ -3679,10 +3668,6 @@ fn inspect_format_context(
             track.sample_format = probe.sample_format.clone();
             audio.push(probe);
         }
-        if kind == TrackKind::Subtitle {
-            subtitles.push(subtitle_probe(&track));
-        }
-
         tracks.push(track);
     }
 
@@ -3698,8 +3683,8 @@ fn inspect_format_context(
             tracks,
             video,
             audio,
-            subtitles,
-            subtitle_fonts: Arc::from(subtitle_fonts),
+            subtitles: Vec::new(),
+            subtitle_fonts: Arc::from([]),
         },
         stream_time_bases,
     )
@@ -3853,150 +3838,6 @@ unsafe fn audio_probe(track: &TrackInfo, codecpar: *const sys::AVCodecParameters
         channels: unsafe { (*codecpar).ch_layout.nb_channels.max(0) as u32 },
         sample_format: unsafe { sample_format_name((*codecpar).format) },
     }
-}
-
-fn subtitle_probe(track: &TrackInfo) -> SubtitleTrackConfig {
-    let mut config = SubtitleTrackConfig::embedded(track.id, track.id);
-    config.language = track.language.clone();
-    config.title = track.title.clone();
-    config
-}
-
-unsafe fn subtitle_font_attachment(
-    stream: *const sys::AVStream,
-    codecpar: *const sys::AVCodecParameters,
-    accepted_count: usize,
-    accepted_bytes: usize,
-) -> Option<SubtitleFontAttachment> {
-    let stream_index = unsafe { (*stream).index };
-    let name = metadata_value(unsafe { (*stream).metadata }, "filename")
-        .unwrap_or_else(|| format!("attachment-{stream_index}"));
-    let mime_type = metadata_value(unsafe { (*stream).metadata }, "mimetype");
-    let codec = unsafe { codec_name((*codecpar).codec_id) };
-    if !is_font_attachment_candidate(&name, mime_type.as_deref(), codec.as_deref()) {
-        return None;
-    }
-
-    let size = unsafe { (*codecpar).extradata_size };
-    let data = unsafe { (*codecpar).extradata };
-    if size <= 0 || data.is_null() {
-        log_subtitle_font_rejected(
-            stream_index,
-            &name,
-            mime_type.as_deref(),
-            0,
-            "attachment has no font data",
-        );
-        return None;
-    }
-    let size = size as usize;
-    if accepted_count >= MAX_SUBTITLE_FONT_ATTACHMENTS {
-        log_subtitle_font_rejected(
-            stream_index,
-            &name,
-            mime_type.as_deref(),
-            size,
-            "container font attachment count limit exceeded",
-        );
-        return None;
-    }
-    if size > MAX_SUBTITLE_FONT_ATTACHMENT_BYTES {
-        log_subtitle_font_rejected(
-            stream_index,
-            &name,
-            mime_type.as_deref(),
-            size,
-            "font attachment byte limit exceeded",
-        );
-        return None;
-    }
-    if accepted_bytes
-        .checked_add(size)
-        .is_none_or(|total| total > MAX_SUBTITLE_FONT_TOTAL_BYTES)
-    {
-        log_subtitle_font_rejected(
-            stream_index,
-            &name,
-            mime_type.as_deref(),
-            size,
-            "container font attachment total byte limit exceeded",
-        );
-        return None;
-    }
-    let bytes = unsafe { slice::from_raw_parts(data, size) }.to_vec();
-    let mut database = fontdb::Database::new();
-    database.load_font_data(bytes.clone());
-    let faces = database.faces().collect::<Vec<_>>();
-    if faces.is_empty() {
-        log_subtitle_font_rejected(
-            stream_index,
-            &name,
-            mime_type.as_deref(),
-            bytes.len(),
-            "font parser found no faces",
-        );
-        return None;
-    }
-
-    let mut families = BTreeSet::new();
-    for face in faces {
-        families.extend(face.families.iter().map(|(family, _)| family.clone()));
-        if !face.post_script_name.is_empty() {
-            families.insert(face.post_script_name.clone());
-        }
-    }
-    let families = families.into_iter().collect::<Vec<_>>();
-    crate::trace::diagnostic(
-        serde_json::json!({
-            "event": "subtitle_font_attachment",
-            "stage": "validated",
-            "sourceStreamIndex": stream_index,
-            "name": name,
-            "mimeType": mime_type,
-            "families": families,
-            "bytes": bytes.len(),
-        })
-        .to_string(),
-    );
-    Some(SubtitleFontAttachment::new(
-        name,
-        mime_type,
-        families,
-        Arc::<[u8]>::from(bytes),
-    ))
-}
-
-fn is_font_attachment_candidate(name: &str, mime_type: Option<&str>, codec: Option<&str>) -> bool {
-    let extension = name
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase());
-    let mime_type = mime_type.map(str::to_ascii_lowercase);
-    matches!(extension.as_deref(), Some("ttf" | "otf" | "ttc" | "otc"))
-        || mime_type.as_deref().is_some_and(|mime| {
-            mime.starts_with("font/") || mime.contains("truetype") || mime.contains("opentype")
-        })
-        || matches!(codec, Some("ttf" | "otf"))
-}
-
-fn log_subtitle_font_rejected(
-    stream_index: i32,
-    name: &str,
-    mime_type: Option<&str>,
-    bytes: usize,
-    reason: &str,
-) {
-    crate::trace::diagnostic(
-        serde_json::json!({
-            "event": "subtitle_font_attachment",
-            "stage": "rejected",
-            "sourceStreamIndex": stream_index,
-            "name": name,
-            "mimeType": mime_type,
-            "bytes": bytes,
-            "reason": reason,
-        })
-        .to_string(),
-    );
 }
 
 unsafe fn subtitle_header_bytes(
@@ -4846,6 +4687,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn subtitle_probe_marks_embedded_tracks_non_removable() {
         let mut track = TrackInfo::embedded(3, TrackKind::Subtitle);
@@ -4982,6 +4824,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn validates_true_type_attachment_and_extracts_family_names() {
         let mut stream = sys::AVStream {
@@ -5007,6 +4850,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn rejects_font_before_copy_when_attachment_limits_are_exceeded() {
         let mut stream = sys::AVStream {

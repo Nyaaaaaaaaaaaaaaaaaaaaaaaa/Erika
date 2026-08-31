@@ -1,5 +1,8 @@
 # Flutter Embedding
 
+> **AV1/AVIF 专用 fork：**下文旧 API 示例中的字幕与弹幕接口仅保留兼容外形，
+> 调用会返回不支持错误，原生运行时不包含这些功能。
+
 [中文](flutter_embedding.zh.md) | [English](flutter_embedding.md) | [日本語](flutter_embedding.ja.md)
 
 Erika 不是 Flutter 视频渲染器。Flutter 只是可选宿主 UI。播放器内部负责解码、时序、原生渲染、字幕、弹幕、音频和 HDR 呈现。

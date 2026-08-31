@@ -479,7 +479,6 @@ tasks.register("buildErikaAndroidRuntime") {
                     "--",
                     "deps",
                     "build",
-                    "--all",
                     "--profile",
                     nativeProfile,
                     "--target",

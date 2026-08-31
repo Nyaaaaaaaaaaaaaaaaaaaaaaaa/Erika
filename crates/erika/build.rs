@@ -8,10 +8,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ERIKA_NATIVE_PROFILE");
     println!("cargo:rerun-if-env-changed=ERIKA_NATIVE_TARGET");
     println!("cargo:rerun-if-env-changed=ERIKA_FFMPEG_DIR");
-    println!("cargo:rerun-if-env-changed=ERIKA_LIBASS_DIR");
-    println!("cargo:rerun-if-env-changed=ERIKA_FREETYPE_DIR");
-    println!("cargo:rerun-if-env-changed=ERIKA_HARFBUZZ_DIR");
-    println!("cargo:rerun-if-env-changed=ERIKA_FRIBIDI_DIR");
     println!("cargo:rerun-if-env-changed=ERIKA_ALLOW_LEGACY_FFMPEG");
     println!("cargo:rerun-if-env-changed=ANDROID_API_LEVEL");
     println!("cargo:rerun-if-env-changed=ANDROID_NDK_HOME");
@@ -41,88 +37,10 @@ fn main() {
         ] {
             println!("cargo:rustc-link-lib={lib}");
         }
-        // Erika always includes C++ code through bundled SoundTouch, and the
-        // libass/HarfBuzz path adds more C++ when that feature is enabled.
-        // Keep the Android runtime dependency independent of Cargo features.
+        // Erika always includes C++ code through bundled SoundTouch.
         println!("cargo:rustc-link-lib=dylib=c++_shared");
         if env::var_os("CARGO_FEATURE_WGPU").is_some() {
             compile_android_vulkan_shaders();
-        }
-    }
-
-    if env::var("CARGO_FEATURE_LIBASS").is_err() {
-        return;
-    }
-
-    println!("cargo:rerun-if-changed=src/libass_log_bridge.c");
-    cc::Build::new()
-        .file("src/libass_log_bridge.c")
-        .warnings(true)
-        .compile("erika_libass_log_bridge");
-
-    let libass = native_dep_dir("ERIKA_LIBASS_DIR", "libass");
-    let freetype = native_dep_dir("ERIKA_FREETYPE_DIR", "freetype");
-    let harfbuzz = native_dep_dir("ERIKA_HARFBUZZ_DIR", "harfbuzz");
-    let fribidi = native_dep_dir("ERIKA_FRIBIDI_DIR", "fribidi");
-
-    for dir in [&libass, &freetype, &harfbuzz, &fribidi] {
-        if !dir.join("lib").exists() {
-            panic!(
-                "native dependency was not found at {}. Run `cargo run -p xtask -- deps build --all --profile {}` first, or set ERIKA_*_DIR.",
-                dir.display(),
-                native_profile()
-            );
-        }
-        println!(
-            "cargo:rustc-link-search=native={}",
-            dir.join("lib").display()
-        );
-    }
-
-    if target_os.as_deref() == Some("android") {
-        for (dir, archive) in [
-            (&libass, "libass.a"),
-            (&fribidi, "libfribidi.a"),
-            (&harfbuzz, "libharfbuzz.a"),
-            (&freetype, "libfreetype.a"),
-        ] {
-            let archive = dir.join("lib").join(archive);
-            println!("cargo:rerun-if-changed={}", archive.display());
-            if !archive.is_file() {
-                panic!(
-                    "Android native dependency archive was not found at {}. Run `cargo run -p xtask -- deps build --all --profile {} --target {}` first.",
-                    archive.display(),
-                    native_profile(),
-                    inferred_native_target().unwrap_or_else(|| "android-target".to_string())
-                );
-            }
-        }
-    }
-
-    if !libass.join("include/ass/ass.h").exists() && !libass.join("include/ass.h").exists() {
-        panic!(
-            "libass headers were not found under {}. Run `cargo run -p xtask -- deps build --all --profile {}` first.",
-            libass.display(),
-            native_profile()
-        );
-    }
-
-    println!("cargo:rustc-link-lib=static=ass");
-    println!("cargo:rustc-link-lib=static=fribidi");
-    println!("cargo:rustc-link-lib=static=harfbuzz");
-    println!("cargo:rustc-link-lib=static=freetype");
-
-    if target_os.as_deref() == Some("windows") {
-        println!("cargo:rustc-link-lib=dwrite");
-    } else if matches!(target_os.as_deref(), Some("ios" | "tvos" | "macos")) {
-        if target_os.as_deref() == Some("macos") {
-            println!("cargo:rustc-link-lib=framework=ApplicationServices");
-        }
-        println!("cargo:rustc-link-lib=framework=CoreText");
-        println!("cargo:rustc-link-lib=framework=CoreFoundation");
-        println!("cargo:rustc-link-lib=framework=CoreGraphics");
-        if target_os.as_deref() == Some("macos") {
-            println!("cargo:rustc-link-lib=iconv");
         }
     }
 }
@@ -252,24 +170,6 @@ fn ffmpeg_dist_dir() -> PathBuf {
         dist = dist.join(target);
     }
     dist.join(native_profile()).join("ffmpeg")
-}
-
-fn native_dep_dir(env_name: &str, name: &str) -> PathBuf {
-    if let Ok(path) = env::var(env_name) {
-        return PathBuf::from(path);
-    }
-    if let Ok(target) = env::var("ERIKA_NATIVE_TARGET") {
-        return workspace_root()
-            .join("third_party/dist")
-            .join(target)
-            .join(native_profile())
-            .join(name);
-    }
-    let mut dist = workspace_root().join("third_party/dist");
-    if let Some(target) = inferred_native_target() {
-        dist = dist.join(target);
-    }
-    dist.join(native_profile()).join(name)
 }
 
 fn native_profile() -> String {

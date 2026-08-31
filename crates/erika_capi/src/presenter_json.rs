@@ -773,7 +773,13 @@ mod tests {
                 .and_then(|response| serde_json::from_str(response).ok())
                 .expect("memory font JSON method returns valid JSON");
             unsafe { erika_string_free(response) };
-            assert_eq!(value.get("ok"), Some(&Value::Bool(true)));
+            assert_eq!(value.get("ok"), Some(&Value::Bool(false)));
+            assert!(
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .is_some_and(|error| error.contains("not included"))
+            );
         }
 
         unsafe { erika_presenter_destroy(handle) };

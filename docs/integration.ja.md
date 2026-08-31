@@ -1,5 +1,8 @@
 # ネイティブホストへの Erika 組み込み
 
+> **AV1/AVIF 専用 fork:** 旧 subtitle/danmaku entry point は ABI 互換用にのみ残り、
+> 呼び出し時は unsupported error を返します。
+
 本ガイドは Erika を非 Flutter ホスト——C/C++/Swift アプリ、Win32 ウィンドウ、C FFI を
 持つ任意のランタイム——に組み込む手順です。**presenter（プッシュ）モデル**を使います。
 Erika が decode・timing・audio・overlay・presentation を所有し、ホストは surface を提供して

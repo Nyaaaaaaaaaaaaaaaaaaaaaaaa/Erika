@@ -2,13 +2,14 @@
 
 > 翻訳：[English](building.md) · [中文](building.zh.md)
 
-Erika は一連の**静的ビルドされたネイティブ依存**（FFmpeg、全ターゲットの dav1d AV1
-ソフトウェアフォールバック、オプションの libass 字幕スタック）をリンクする Rust workspace です。これらのネイティブライブラリは vendoring
+Erika は最小化された**静的ネイティブ依存**（FFmpeg、全ターゲットの
+dav1d AV1 ソフトウェアフォールバック、zlib）をリンクする Rust workspace です。
+この fork に字幕・弾幕用ネイティブ依存はありません。これらのネイティブライブラリは vendoring
 されていません——`xtask` オーケストレータで一度ビルドすると `third_party/dist/` 配下に
 配置され、Rust crate がそのステージングディレクトリをリンクします。
 
 ```
-xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib,libass,…}
+xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib}
                                         │
                           erika_ffmpeg_sys/build.rs（dist を自動発見、bindgen 実行）
                                         │
@@ -32,8 +33,7 @@ xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,z
 ### ビルドツール —— macOS / Unix ホスト
 
 `tar`、`make`、`clang`、`cmake`、`pkg-config`、`python3`（`venv` 付き）が `PATH` 上に
-必要です。完全な字幕スタック（`--all`）には加えて `meson` と `ninja`（Intel ホストでは
-FFmpeg の x86 アセンブリに `nasm`）が必要です。macOS では Xcode Command Line Tools と、
+必要です。Intel ホストでは FFmpeg の x86 アセンブリに `nasm` も必要です。macOS では Xcode Command Line Tools と、
 上記を Homebrew で導入します。
 
 `erika_ffmpeg_sys` は **bindgen** を実行するため `libclang` が必要です。自動で見つから
@@ -45,7 +45,6 @@ FFmpeg の x86 アセンブリに `nasm`）が必要です。macOS では Xcode 
 - **POSIX シェル**（Git for Windows または MSYS2）——FFmpeg の `configure` に必要。
 - **GNU make**（MSYS2 `make` または MinGW `mingw32-make`）。
 - FFmpeg アセンブリに `nasm`。
-- `--all` には **Python**（`venv` 付き）。`xtask` が `pkg-config` シムを自動で用意します。
 
 MSVC 環境が有効なシェル（*"x64 Native Tools Command Prompt"* など）からコマンドを実行し、
 `xtask` がツールチェーンを見つけられるようにします。
@@ -67,11 +66,8 @@ Android の最小 API は 26 です。
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# 基本セット（zlib + FFmpeg、Android は dav1d も）—— LGPL profile
+# AV1/AVIF native set（zlib + FFmpeg、利用 target では dav1d も）
 cargo run -p xtask -- deps build --profile lgpl
-
-# libass 字幕スタックを含めすべて
-cargo run -p xtask -- deps build --all --profile lgpl
 ```
 
 サブコマンド：`plan`（計画を表示）、`fetch`（ソースのみ取得）、`status`（存在/ビルド
@@ -83,7 +79,6 @@ cargo run -p xtask -- deps build --all --profile lgpl
 |--------|----|------|------|
 | `--profile` | `lgpl`、`gpl-full` | `lgpl` | FFmpeg ライセンス profile（下記）。 |
 | `--target` | ターゲット表参照 | `host` | クロスコンパイル先。 |
-| `--all` | — | off | libass + FreeType + HarfBuzz + FriBidi（字幕描画）も。基本セットは zlib + FFmpeg、Android ターゲットでは dav1d も含む。 |
 | `--force` | — | off | 最新マーカーがあっても再ビルド。 |
 | `--jobs N` | 整数 | 自動 | ネイティブビルドの並列度。 |
 
@@ -127,7 +122,7 @@ Apple plugin の既定は checksum 検証済み prebuilt アーカイブです�
 native library を直接 build する場合、3 つの target 指定を一致させます：
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-apple-darwin
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-apple-darwin
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-darwin \
   cargo build -p erika_capi --release --target aarch64-apple-darwin
 ```
@@ -137,18 +132,18 @@ Rust の tvOS target は tier 3 のため、直接 build する場合は nightly
 
 ```sh
 rustup toolchain install nightly --component rust-src
-cargo run -p xtask -- deps build --all --profile lgpl \
+cargo run -p xtask -- deps build --profile lgpl \
   --target aarch64-apple-tvos-sim
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-tvos-sim \
   cargo +nightly rustc -Z build-std=std,panic_abort -p erika_capi --release \
-  --target aarch64-apple-tvos-sim --no-default-features --features libass \
+  --target aarch64-apple-tvos-sim --no-default-features \
   --lib --crate-type staticlib
 ```
 
 Windows ARM64 では対応する PowerShell command を使います：
 
 ```powershell
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-pc-windows-msvc
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-pc-windows-msvc
 $env:ERIKA_NATIVE_PROFILE = "lgpl"
 $env:ERIKA_NATIVE_TARGET = "aarch64-pc-windows-msvc"
 cargo build -p erika_capi --release --target aarch64-pc-windows-msvc
@@ -183,7 +178,7 @@ third_party/
   build/<target>/<profile>/    out-of-tree ビルドツリー
   dist/<target>/<profile>/     crate がリンクする install prefix:
     ffmpeg/{include,lib}
-    dav1d/   zlib/    libass/    freetype/    harfbuzz/    fribidi/
+    dav1d/   zlib/
 ```
 
 `host` ターゲットでは `<target>` のパスセグメントは省略されます

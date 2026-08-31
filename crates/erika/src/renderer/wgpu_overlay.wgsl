@@ -1,7 +1,7 @@
 // WGSL port of the Metal overlay shader in `renderer/metal/apple.rs`. Draws a
 // textured quad placed by pixel rect within the viewport, alpha-blended over the
 // video plane. Mode 0 samples straight RGBA; mode 1 is an alpha mask tinted by
-// `color` (libass coverage bitmaps).
+// `color` (single-channel alpha masks).
 
 struct OverlayUniforms {
     rect: vec4<f32>,

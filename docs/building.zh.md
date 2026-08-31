@@ -1,11 +1,12 @@
 # 构建 Erika
 
-Erika 是一个 Rust workspace,它链接一组**静态构建的原生依赖**(FFmpeg、Android 的
-dav1d AV1 软解回退,以及可选的 libass 字幕栈)。这些原生库不随仓库 vendoring——你用 `xtask` 编排器构建一次,它会把
+Erika 是一个 Rust workspace，它链接一组最小化的**静态原生依赖**
+（FFmpeg、各平台的 dav1d AV1 软觥回退与 zlib）。本 fork 不包含字幕或弹幕的
+原生依赖。这些原生库不随仓库 vendoring——你用 `xtask` 编排器构建一次，它会把
 产物安置到 `third_party/dist/` 下,Rust crate 再链接那个目录。
 
 ```
-xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib,libass,…}
+xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,zlib}
                                         │
                           erika_ffmpeg_sys/build.rs（自动发现 dist,运行 bindgen）
                                         │
@@ -28,9 +29,8 @@ xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,z
 
 ### 构建工具 —— macOS / Unix 宿主
 
-`tar`、`make`、`clang`、`cmake`、`pkg-config`、`python3`(带 `venv`)必须在 `PATH` 上。
-构建完整字幕栈(`--all`)还需 `meson` 和 `ninja`(Intel 宿主上 FFmpeg 的 x86 汇编需
-`nasm`)。macOS 上安装 Xcode Command Line Tools,再通过 Homebrew 装上述工具。
+`tar`、`make`、`clang`、`cmake`、`pkg-config`、`python3`(带 `venv`)必须在 `PATH` 上；
+Intel 宿主上的 FFmpeg x86 汇编还需 `nasm`。macOS 上安装 Xcode Command Line Tools,再通过 Homebrew 装上述工具。
 
 `erika_ffmpeg_sys` 运行 **bindgen**,需要 `libclang`。若未自动找到,设置 `LIBCLANG_PATH`。
 
@@ -40,7 +40,6 @@ xtask deps build  ──▶  third_party/dist/<target>/<profile>/{ffmpeg,dav1d,z
 - 一个 **POSIX shell**(Git for Windows 或 MSYS2)——FFmpeg 的 `configure` 需要它。
 - **GNU make**(MSYS2 `make` 或 MinGW `mingw32-make`)。
 - FFmpeg 汇编需 `nasm`。
-- `--all` 还需 **Python**(带 `venv`);`xtask` 会自动提供 `pkg-config` shim。
 
 请在 MSVC 环境已激活的 shell 里运行命令(如 *"x64 Native Tools Command Prompt"*),
 以便 `xtask` 定位工具链。
@@ -71,11 +70,8 @@ Android 最低 API 为 **26**;只在需要更高版本时用 `ANDROID_API_LEVEL`
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# 构建基础集(zlib + FFmpeg;dav1d 覆盖 Android 与 Apple 目标)—— LGPL profile
+# 构建 AV1/AVIF 原生依赖(zlib + FFmpeg,以及使用目标上的 dav1d)
 cargo run -p xtask -- deps build --profile lgpl
-
-# 构建全部,含 libass 字幕栈
-cargo run -p xtask -- deps build --all --profile lgpl
 ```
 
 子命令:`plan`(打印计划)、`fetch`(只下载源)、`status`(已有/已构建)、`build`
@@ -87,7 +83,6 @@ cargo run -p xtask -- deps build --all --profile lgpl
 |------|------|------|------|
 | `--profile` | `lgpl`、`gpl-full` | `lgpl` | FFmpeg 许可证 profile(见下)。 |
 | `--target` | 见目标表 | `host` | 交叉编译目标。 |
-| `--all` | — | 关 | 同时构建 libass + FreeType + HarfBuzz + FriBidi(字幕渲染)。基础集是 zlib + FFmpeg,Android 与 Apple 目标还包含 dav1d。 |
 | `--force` | — | 关 | 即使已是最新标记也重建。 |
 | `--jobs N` | 整数 | 自动 | 原生构建的并行度。 |
 
@@ -134,7 +129,7 @@ Apple 插件默认使用带校验的预构建归档，唯一例外是 Erika chec
 直接构建原生库时，三个目标参数必须一致：
 
 ```sh
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-apple-darwin
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-apple-darwin
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-darwin \
   cargo build -p erika_capi --release --target aarch64-apple-darwin
 ```
@@ -144,18 +139,18 @@ tvOS 的 Rust 目标虽已是 tier 2，但 Erika 直接构建时仍用 nightly �
 
 ```sh
 rustup toolchain install nightly --component rust-src
-cargo run -p xtask -- deps build --all --profile lgpl \
+cargo run -p xtask -- deps build --profile lgpl \
   --target aarch64-apple-tvos-sim
 ERIKA_NATIVE_PROFILE=lgpl ERIKA_NATIVE_TARGET=aarch64-apple-tvos-sim \
   cargo +nightly rustc -Z build-std=std,panic_abort -p erika_capi --release \
-  --target aarch64-apple-tvos-sim --no-default-features --features libass \
+  --target aarch64-apple-tvos-sim --no-default-features \
   --lib --crate-type staticlib
 ```
 
 Windows ARM64 使用对应的 PowerShell 命令：
 
 ```powershell
-cargo run -p xtask -- deps build --all --profile lgpl --target aarch64-pc-windows-msvc
+cargo run -p xtask -- deps build --profile lgpl --target aarch64-pc-windows-msvc
 $env:ERIKA_NATIVE_PROFILE = "lgpl"
 $env:ERIKA_NATIVE_TARGET = "aarch64-pc-windows-msvc"
 cargo build -p erika_capi --release --target aarch64-pc-windows-msvc
@@ -171,7 +166,7 @@ $env:ANDROID_NDK_ROOT = $env:ANDROID_NDK_HOME
 $env:ANDROID_API_LEVEL = "26"
 
 rustup target add x86_64-linux-android
-cargo run -p xtask -- deps build --all --profile lgpl --target x86_64-linux-android
+cargo run -p xtask -- deps build --profile lgpl --target x86_64-linux-android
 
 $bin = "$env:ANDROID_NDK_HOME\toolchains\llvm\prebuilt\windows-x86_64\bin"
 $prebuilt = Split-Path $bin -Parent
@@ -188,7 +183,7 @@ $env:ERIKA_NATIVE_PROFILE = "lgpl"
 $env:ERIKA_NATIVE_TARGET = "x86_64-linux-android"
 
 cargo build -p erika_capi --release --target x86_64-linux-android `
-  --no-default-features --features libass,wgpu
+  --no-default-features --features wgpu
 ```
 
 Cargo 会在 `target/x86_64-linux-android/release` 下同时生成
@@ -221,7 +216,7 @@ third_party/
   build/<target>/<profile>/    out-of-tree 构建树
   dist/<target>/<profile>/     crate 链接的安装前缀:
     ffmpeg/{include,lib}
-    dav1d/   zlib/    libass/    freetype/    harfbuzz/    fribidi/
+    dav1d/   zlib/
 ```
 
 对 `host` 目标,`<target>` 路径段省略(`third_party/dist/<profile>/…`)。

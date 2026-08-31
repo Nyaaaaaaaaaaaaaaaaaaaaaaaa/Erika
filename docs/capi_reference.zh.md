@@ -1,5 +1,8 @@
 # Erika C ABI 参考手册
 
+> **AV1/AVIF 专用构建：**字幕和弹幕实现已删除；旧符号仅为二进制兼容保留，调用会
+> 返回 `PlayerError`。
+
 本文档描述 `erika_capi` 导出的稳定 C ABI，声明在
 [`crates/erika_capi/include/erika.h`](../crates/erika_capi/include/erika.h)。该
 ABI 是所有非 Rust 宿主（C、C++、Swift、Dart FFI、Win32……）的唯一接入面。Rust

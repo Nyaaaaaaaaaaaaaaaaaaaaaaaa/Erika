@@ -57,9 +57,9 @@ use crate::subtitle::{
     decoded_subtitle_frames_to_ass_script_with_style,
 };
 use crate::subtitle::{
-    DecodedSubtitleFrame, MAX_MEMORY_SUBTITLE_FONT_BYTES, MAX_MEMORY_SUBTITLE_FONT_TOTAL_BYTES,
-    SubtitleAssStyle, SubtitleFontAttachment, SubtitleRendererCore, SubtitleStyleConfig,
-    SubtitleTrackConfig, SubtitleViewport, decoded_subtitle_frames_to_timeline,
+    DecodedSubtitleFrame, SubtitleAssStyle, SubtitleFontAttachment, SubtitleRendererCore,
+    SubtitleStyleConfig, SubtitleTrackConfig, SubtitleViewport,
+    decoded_subtitle_frames_to_timeline,
 };
 use crate::trace;
 #[cfg(target_os = "windows")]
@@ -1009,70 +1009,10 @@ impl PresenterRuntime {
     }
 
     pub fn register_subtitle_font_bytes(&mut self, data: &[u8]) -> Result<u64> {
-        if data.is_empty() || data.len() > MAX_MEMORY_SUBTITLE_FONT_BYTES {
-            return Err(PlayerError::Playback(
-                "subtitle memory font size is invalid".to_string(),
-            ));
-        }
-        let registered_bytes = self
-            .subtitle_memory_fonts
-            .registered
-            .values()
-            .try_fold(0usize, |total, font| {
-                total.checked_add(font.attachment.byte_len())
-            });
-        if registered_bytes
-            .and_then(|total| total.checked_add(data.len()))
-            .is_none_or(|total| total > MAX_MEMORY_SUBTITLE_FONT_TOTAL_BYTES)
-        {
-            return Err(PlayerError::Playback(
-                "subtitle memory font total byte limit exceeded".to_string(),
-            ));
-        }
-        let mut database = fontdb::Database::new();
-        database.load_font_data(data.to_vec());
-        let faces = database
-            .faces()
-            .map(|face| SubtitleMemoryFontFace {
-                index: face.index,
-                families: face
-                    .families
-                    .iter()
-                    .map(|(family, _)| family.clone())
-                    .collect(),
-                post_script_name: face.post_script_name.clone(),
-                weight: face.weight.0,
-                italic: face.style == fontdb::Style::Italic,
-                monospaced: face.monospaced,
-            })
-            .collect::<Vec<_>>();
-        let mut families = faces
-            .iter()
-            .flat_map(|face| face.families.iter().cloned())
-            .collect::<Vec<_>>();
-        families.sort();
-        families.dedup();
-        if families.is_empty() {
-            return Err(PlayerError::Playback(
-                "subtitle memory font contains no faces".to_string(),
-            ));
-        }
-        self.subtitle_memory_fonts.next_id = self.subtitle_memory_fonts.next_id.saturating_add(1);
-        let id = self.subtitle_memory_fonts.next_id.max(1);
-        self.subtitle_memory_fonts.registered.insert(
-            id,
-            SubtitleMemoryFontEntry {
-                attachment: SubtitleFontAttachment::new(
-                    format!("memory-subtitle-font-{id}"),
-                    None,
-                    families,
-                    Arc::<[u8]>::from(data),
-                ),
-                faces,
-            },
-        );
-        self.bump_subtitle_memory_font_registry_generation();
-        Ok(id)
+        let _ = data;
+        Err(PlayerError::Playback(
+            "subtitle support is not included in this AV1/AVIF-specialized Erika build".to_string(),
+        ))
     }
 
     pub fn select_subtitle_memory_fonts(&mut self, ids: &[u64]) -> Result<()> {
@@ -4408,6 +4348,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert!(overlay.subtitle_planes.is_empty());
     }
 
+    #[cfg(any())]
     #[test]
     fn subtitle_state_renders_text_frames_into_overlay() {
         let mut state = SubtitleFrameState::default();
@@ -4563,6 +4504,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     #[cfg(feature = "wgpu")]
+    #[cfg(any())]
     #[test]
     fn registering_an_unselected_memory_font_does_not_invalidate_renderers() {
         let mut presenter = PresenterRuntime::new(PresenterConfig::default()).unwrap();
@@ -4615,6 +4557,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert_eq!(danmaku_motion_backstep(DanmakuMode::Top, 100.0, 140.0), 0.0);
     }
 
+    #[cfg(any())]
     #[test]
     fn async_danmaku_planner_applies_font_selection_generation() {
         let engine = danmaku_engine("async font");
@@ -4943,6 +4886,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert_eq!(presenter.current_generation, changed_generation);
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn paint_only_danmaku_config_does_not_bump_generation() {
@@ -4962,6 +4906,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         );
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn re_enabling_danmaku_requests_the_current_window_immediately() {
@@ -5002,6 +4947,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         );
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn disabling_danmaku_rejects_an_in_flight_enabled_plan() {
@@ -5074,6 +5020,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert!(danmaku_viewport_requires_relayout(current, other_density));
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn danmaku_config_change_retains_current_plan_until_replacement_is_ready() {
@@ -5135,6 +5082,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert!(current.is_none());
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn retained_config_fallback_keeps_scrolling_while_relayout_is_pending() {
@@ -5287,6 +5235,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert_eq!(viewport, DanmakuViewport::with_scale(1081, 607, 2.625));
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn resized_capture_rebuilds_subtitle_overlay_for_capture_viewport() {
@@ -5305,6 +5254,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert_eq!(overlay.subtitle_planes.len(), 1);
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn screenshot_capture_context_omits_danmaku() {
@@ -5331,6 +5281,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn stale_danmaku_plan_refreshes_without_new_video_frame() {
         let mut engine = danmaku_engine("first track");
@@ -5359,6 +5310,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         assert_eq!(refreshed.items[0].item_id, 2);
     }
 
+    #[cfg(any())]
     #[test]
     #[cfg(feature = "wgpu")]
     fn presenter_danmaku_session_merges_tracks_and_applies_track_controls() {

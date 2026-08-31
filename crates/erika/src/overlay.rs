@@ -157,7 +157,8 @@ impl Default for OverlayTimeline {
     }
 }
 
-#[cfg(test)]
+// Subtitle overlay coverage belonged to the removed subtitle implementation.
+#[cfg(all(test, any()))]
 mod tests {
     use super::*;
     use crate::subtitle::{SubtitleCue, SubtitleTimeline};
