@@ -289,8 +289,10 @@ pipeline, preserving screenshots and the diagnostic HUD. This is hardware
 decode with a CPU upload, not a zero-copy Surface path; metrics must report it
 accordingly. If AV1 MediaCodec cannot open or fails while decoding, the software
 path explicitly selects FFmpeg's `libdav1d` decoder. `xtask` builds dav1d 1.5.1
-from source for every target, with both 8-bit and high-bit-depth
-support; the 32-bit Android x86 slice disables assembly to preserve PIC safety.
+from source for every target, with both 8-bit and high-bit-depth support; the
+32-bit Android x86 slice disables assembly to preserve PIC safety. FFmpeg's
+separate native AV1 decoder is not compiled, so software fallback has exactly
+one implementation.
 
 ### Verify Android output negotiation
 

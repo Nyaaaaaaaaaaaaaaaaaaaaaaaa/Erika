@@ -253,11 +253,12 @@ cargo test --workspace               # 单元 + 集成测试
 - Android:每 ABI 一个 `liberika_capi.so` 与匹配的 NDK
   `libc++_shared.so`;同时保留 `liberika_capi.a` 供原生嵌入方使用。
 
-Android FFmpeg 的视觉硬解只保留 AV1 MediaCodec decoder。主路径让 MediaCodec 输出软件可读 YUV,继续复用共享 wgpu 上传、
-字幕、弹幕和截图合成。这是“硬解 + CPU upload”,不是 Surface 零拷贝,统计与日志必须
-如实区分。AV1 MediaCodec 无法打开或解码失败时,软件路径会显式选择 FFmpeg 的
-`libdav1d` decoder。`xtask` 为所有目标从源码构建 dav1d 1.5.1,同时支持
-8-bit 与高位深;32 位 x86 为保证 PIC 安全会禁用汇编。
+Android FFmpeg 的视觉硬解只保留 AV1 MediaCodec decoder。主路径让 MediaCodec 输出软件可读 YUV，继续复用共享 wgpu 上传、
+截图和诊断 HUD。这是“硬解 + CPU upload”，不是 Surface 零拷贝，统计与日志必须
+如实区分。AV1 MediaCodec 无法打开或解码失败时，软件路径会显式选择 FFmpeg 的
+`libdav1d` decoder。`xtask` 为所有目标从源码构建 dav1d 1.5.1，同时支持
+8-bit 与高位深；32 位 x86 为保证 PIC 安全会禁用汇编。FFmpeg 自带的另一套 AV1
+decoder 不会被编译，因此软件回退只有一个实现。
 
 ### 验证 Android 输出协商
 

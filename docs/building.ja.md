@@ -221,6 +221,7 @@ Android の visual MediaCodec path は AV1 のみを有効にし、
 読み取り可能な YUV を共有 wgpu 合成パイプラインへ渡します。ハードウェアデコードですが
 CPU upload を伴い、Surface ゼロコピーではありません。AV1 MediaCodec が開けない、または
 デコードに失敗した場合、ソフトウェアパスは FFmpeg の `libdav1d` decoder を明示的に選択します。
+FFmpeg native AV1 decoder は build しないため、software fallback の実装は dav1d だけです。
 `xtask` は全 target 向けに dav1d 1.5.1 をソースからビルドし、8-bit と高ビット深度を
 有効にします。32-bit x86 では PIC 安全性のためアセンブリを無効にします。
 

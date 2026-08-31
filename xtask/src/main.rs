@@ -200,7 +200,7 @@ impl NativeDependencyProfile {
                 "--enable-demuxer=mov,matroska,av1,obu,ivf",
                 "--enable-bsf=extract_extradata",
                 "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
-                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
+                "--enable-decoder=aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
             Self::GplFull => &[
                 "--enable-gpl",
@@ -217,7 +217,7 @@ impl NativeDependencyProfile {
                 "--enable-demuxer=mov,matroska,av1,obu,ivf",
                 "--enable-bsf=extract_extradata",
                 "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
-                "--enable-decoder=av1,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
+                "--enable-decoder=aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
         }
     }
@@ -4494,7 +4494,7 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_profiles_enable_only_the_av1_visual_stack() {
+    fn ffmpeg_profiles_exclude_native_and_non_av1_visual_decoders() {
         for profile in [
             NativeDependencyProfile::Lgpl,
             NativeDependencyProfile::GplFull,
@@ -4512,8 +4512,8 @@ mod tests {
                 .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
                 .flat_map(|value| value.split(','))
                 .collect::<HashSet<_>>();
-            assert!(decoders.contains("av1"));
             for forbidden in [
+                "av1",
                 "h264",
                 "hevc",
                 "vp8",
@@ -4535,6 +4535,49 @@ mod tests {
                 assert!(
                     !decoders.contains(forbidden),
                     "unexpected decoder {forbidden}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_target_uses_dav1d_without_the_native_ffmpeg_av1_decoder() {
+        let targets = [
+            NativeTarget::Host,
+            NativeTarget::Aarch64Macos,
+            NativeTarget::X86_64Macos,
+            NativeTarget::Aarch64Ios,
+            NativeTarget::Aarch64IosSimulator,
+            NativeTarget::X86_64IosSimulator,
+            NativeTarget::Aarch64Tvos,
+            NativeTarget::Aarch64TvosSimulator,
+            NativeTarget::X86_64TvosSimulator,
+            NativeTarget::X86_64WindowsMsvc,
+            NativeTarget::Aarch64WindowsMsvc,
+            NativeTarget::Aarch64Android,
+            NativeTarget::Armv7Android,
+            NativeTarget::X86_64Android,
+            NativeTarget::I686Android,
+            NativeTarget::Aarch64Ohos,
+        ];
+        for profile in [
+            NativeDependencyProfile::Lgpl,
+            NativeDependencyProfile::GplFull,
+        ] {
+            for target in targets {
+                let flags = profile.ffmpeg_configure_flags_for_target(target);
+                let decoders = flags
+                    .iter()
+                    .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
+                    .flat_map(|value| value.split(','))
+                    .collect::<HashSet<_>>();
+                assert!(
+                    decoders.contains("libdav1d"),
+                    "missing dav1d for {target:?}"
+                );
+                assert!(
+                    !decoders.contains("av1"),
+                    "native FFmpeg AV1 decoder enabled for {target:?}"
                 );
             }
         }
