@@ -1,0 +1,96 @@
+name: Publish native release from verified run
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Erika tag to publish
+        required: true
+        type: string
+      run_id:
+        description: Successful Release workflow run containing native artifacts
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish verified native artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify source run and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          test "$(jq -r '.name' <<<"$run_json")" = "Release"
+          test "$(jq -r '.conclusion' <<<"$run_json")" = "success"
+          test "$(jq -r '.head_sha' <<<"$run_json")" = "$(git rev-parse HEAD)"
+
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          path: artifacts
+
+      - name: Verify archives and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            erika-capi-android.zip
+            erika-capi-ios.zip
+            erika-capi-macos-arm64.zip
+            erika-capi-macos-universal.zip
+            erika-capi-macos-x64.zip
+            erika-capi-openharmony-arm64.zip
+            erika-capi-tvos.zip
+            erika-capi-windows-arm64.zip
+            erika-capi-windows-x64.zip
+          )
+          mapfile -d '' archives < <(find artifacts -type f -name '*.zip' -print0 | sort -z)
+          test "${#archives[@]}" -eq "${#expected[@]}"
+          for name in "${expected[@]}"; do
+            test "$(find artifacts -type f -name "$name" | wc -l)" -eq 1
+          done
+          : > SHA256SUMS
+          for archive in "${archives[@]}"; do
+            digest="$(shasum -a 256 "$archive" | cut -d ' ' -f1)"
+            printf '%s  %s\n' "$digest" "$(basename "$archive")" >> SHA256SUMS
+          done
+          test -s SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            artifacts/**/*.zip
+            SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            AV1 video and static AVIF-only `erika_capi` C ABI bundles using the
+            static `lgpl` profile, with platform hardware decode where available
+            and dav1d software fallback.
+
+            Includes macOS arm64, macOS x64, macOS universal, Windows x64,
+            Windows ARM64, iOS, tvOS, Android arm64-v8a, armeabi-v7a, x86_64,
+            and x86, plus OpenHarmony arm64. Subtitle and danmaku support are
+            not included in this fork release.
+
+            Each archive contains the native library, `include/erika.h`,
+            `LICENSE` (MPL-2.0), and `THIRD_PARTY_NOTICES.md`. `SHA256SUMS`
+            records every published archive digest.
