@@ -1,6 +1,6 @@
 {
   "name": "erika",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Native ArkTS AV1 video and static AVIF SDK powered by Erika",
   "main": "Index.ets",
   "author": {

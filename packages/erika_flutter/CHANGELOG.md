@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.8
+
+- Switched the fork package to AV1 video and static AVIF-only native runtimes.
+- Removed subtitle and danmaku support from the packaged runtime.
+
 - Added per-open HTTP read-ahead tuning through `httpReadAheadBytes` on
   Android, Apple platforms, Windows, and OpenHarmony.
 - Added a packed-alpha video mode that stores color and alpha side by side,

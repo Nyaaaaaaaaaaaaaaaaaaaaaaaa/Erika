@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.8 - 2026-09-01
+
+### Media scope
+
+- Published the fork's AV1 video and static AVIF-only native runtimes, with
+  platform hardware decode preferred where supported and dav1d fallback.
+- Removed subtitle and danmaku decoding, rendering, and packaging dependencies
+  from the fork runtime.
+
 ### C API
 
 - Added `ErikaOpenOptions` and `erika_open_with_options` /

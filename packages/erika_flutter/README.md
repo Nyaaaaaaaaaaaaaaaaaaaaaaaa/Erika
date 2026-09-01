@@ -64,7 +64,7 @@ points the build phase at an explicit dylib to bundle instead of building.
 
 ## Native binaries
 
-The plugin downloads the matching `v0.1.7` native runtime from
+The plugin downloads the matching `v0.1.8` native runtime from
 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` by default on macOS, Windows, iOS, tvOS,
 Android, and OpenHarmony. `ERIKA_PREBUILT_REPOSITORY=owner/repo` overrides that
 source. Every archive is pinned by SHA-256; a missing or invalid fork archive

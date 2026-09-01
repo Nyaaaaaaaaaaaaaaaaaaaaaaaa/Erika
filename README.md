@@ -83,10 +83,11 @@ ErikaVideoView(player: player)
 
 ### Flutter package
 
-此 fork 尚未发布 pub.dev 或预编译二进制。请从本仓库源码依赖并设置
-`ERIKA_FORCE_SOURCE_BUILD=1`；包脚本的预编译默认仓库是
-`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika`，也可通过 `ERIKA_PREBUILT_REPOSITORY`
-覆盖。组织发布对应资产之前，预编译模式会明确失败，不会回退下载上游全格式二进制。
+此 fork 尚未发布 pub.dev；请从本仓库依赖 Flutter package。`v0.1.8`
+开始提供经过校验的组织内预编译原生库，包脚本默认从
+`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 下载，也可通过
+`ERIKA_PREBUILT_REPOSITORY` 覆盖。只有调试 Erika 源码时才设置
+`ERIKA_FORCE_SOURCE_BUILD=1`，预编译失败不会回退下载上游全格式二进制。
 
 上游 pub.dev 包不代表本 fork 的 AV1/AVIF 支持边界。
 
