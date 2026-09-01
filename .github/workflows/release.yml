@@ -491,6 +491,9 @@ jobs:
           --target "$ERIKA_NATIVE_TARGET"
           --no-default-features --features wgpu
       - name: Build OpenHarmony Flutter native bridge
+        env:
+          ERIKA_FORCE_SOURCE_BUILD: "1"
+          ERIKA_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           cmake -S packages/erika_flutter/ohos/src/main/cpp \
