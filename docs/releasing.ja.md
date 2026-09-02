@@ -2,11 +2,10 @@
 
 > 翻訳：[English](releasing.md) · [中文](releasing.zh.md)
 
-> fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` は native、pub.dev、OHPM、Swift
-> artifact をまだ公開していません。ecosystem publish workflow は `AimesSoft/Erika`
-> のみで実行される guard を持ち、この fork は upstream package channel または
-> `AimesSoft/ErikaSwift` に書き込みません。将来の organization-owned native GitHub
-> Release workflow は保持します。
+> fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` は organization-owned native
+> artifact だけを自身の GitHub Release で公開します。ecosystem publish workflow は
+> `AimesSoft/Erika` のみで実行される guard を持ち、この fork は pub.dev、OHPM、
+> upstream package channel、`AimesSoft/ErikaSwift` に書き込みません。
 
 prebuilt download の既定 repository は `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` です。
 `ERIKA_PREBUILT_REPOSITORY=owner/repo` で上書きでき、fork asset が無い場合は明示的に
@@ -66,9 +65,9 @@ pub.dev への公開は [pub-publish.yml](../.github/workflows/pub-publish.yml) 
 native archive には build metadata が含まれるため、package に固定する SHA-256 は対応する
 GitHub Release の作成後に更新します。公開順序は次の通りです：
 
-1. 下記の手順で `v0.1.8` を push する；
+1. 下記の手順で `v0.2.0` を push する；
 2. native GitHub Release と `SHA256SUMS` の完了後、Action が package manifest を更新し、
-   `erika_flutter-v0.1.8` tag を自動作成する；
+   `erika_flutter-v0.2.0` tag を自動作成する；
 3. その tag の Action が package version、native version、GitHub Release の全 SHA-256 を
    検証してから pub.dev OIDC で公開する。
 
@@ -88,7 +87,7 @@ verification を完了してから package ownership をその publisher に移�
 Release は [release.yml](../.github/workflows/release.yml) で自動化されています。GitHub Release を作成するには `v*` tag を push します：
 
 ```sh
-VERSION=0.1.8
+VERSION=0.2.0
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```

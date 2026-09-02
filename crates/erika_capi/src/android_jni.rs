@@ -564,6 +564,7 @@ pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeAttach
                         direct_composition: direct_composition != 0,
                         desired_headroom,
                         fallback_reason,
+                        native_data_space: -1,
                     },
                 )
             };

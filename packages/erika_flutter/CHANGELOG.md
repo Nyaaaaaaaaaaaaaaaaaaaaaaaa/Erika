@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-03
+
+- Added the HarmonyOS NEXT API 18+ HDR surface contract, API 20 build target,
+  DisplaySoloist VSync, explicit SDR fallback, and confirmed-output events.
+- Added platform-neutral dynamic-range status/capabilities and `preferHdr`;
+  platform-specific output mode spellings are deprecated.
+- Added static HEIF and JPEG base-image decode alongside cached static AVIF.
 
 ## 0.1.8
 

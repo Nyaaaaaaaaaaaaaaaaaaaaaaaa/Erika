@@ -60,7 +60,7 @@ use erika::presenter::{
 ))]
 use erika::renderer::metal::{MetalOutputMode, MetalRendererConfig, VideoAlphaMode};
 use erika::renderer::output::{
-    ActiveOutputEncoding, OutputFallbackReason, OutputMode, OutputRuntimeStatus,
+    ActiveOutputEncoding, DynamicRange, OutputFallbackReason, OutputMode, OutputRuntimeStatus,
     OutputSurfaceFormat,
 };
 #[cfg(any(
@@ -399,6 +399,20 @@ pub enum ErikaOutputFallbackReason {
     ScrgbDataSpaceVerificationFailed = 6,
     SurfaceConfigureFailed = 7,
     LegacyAppleEdrUnsupported = 8,
+    TenBitSurfaceFormatUnavailable = 9,
+    HdrWindowConfigurationFailed = 10,
+    HdrMetadataVerificationFailed = 11,
+    NativeVsyncUnavailable = 12,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErikaDynamicRange {
+    Unknown = 0,
+    Sdr = 1,
+    Hdr10Pq = 2,
+    Hlg = 3,
+    UltraHdrGainMap = 4,
 }
 
 impl ErikaPresenterOutputMode {
@@ -513,6 +527,7 @@ pub struct ErikaSurfaceOutputCapabilities {
     pub direct_composition: bool,
     pub desired_headroom: f32,
     pub fallback_reason: i32,
+    pub native_data_space: i32,
 }
 
 impl Default for ErikaSurfaceOutputCapabilities {
@@ -522,6 +537,7 @@ impl Default for ErikaSurfaceOutputCapabilities {
             direct_composition: false,
             desired_headroom: 0.0,
             fallback_reason: ErikaOutputFallbackReason::None as i32,
+            native_data_space: -1,
         }
     }
 }
@@ -538,6 +554,7 @@ impl From<ErikaSurfaceOutputCapabilities> for SurfaceOutputCapabilities {
                 0.0
             },
             fallback_reason: OutputFallbackReason::from_raw(value.fallback_reason),
+            native_data_space: value.native_data_space,
         }
     }
 }
@@ -569,6 +586,16 @@ pub struct ErikaOutputStatus {
     pub data_space_failures: u64,
     pub headroom_updates: u64,
     pub extended_linear_frames: u64,
+}
+
+/// Additive 0.2 status extension kept separate from `ErikaOutputStatus` so
+/// existing 0.1 embedders retain their exact struct size and ABI.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ErikaDynamicRangeStatus {
+    pub source_dynamic_range: i32,
+    pub active_dynamic_range: i32,
+    pub hdr_output_confirmed: bool,
 }
 
 #[repr(C)]
@@ -1594,6 +1621,21 @@ fn output_status_to_c(status: OutputRuntimeStatus) -> ErikaOutputStatus {
     }
 }
 
+fn dynamic_range_status_to_c(status: OutputRuntimeStatus) -> ErikaDynamicRangeStatus {
+    let to_c = |dynamic_range: DynamicRange| match dynamic_range {
+        DynamicRange::Unknown => ErikaDynamicRange::Unknown as i32,
+        DynamicRange::Sdr => ErikaDynamicRange::Sdr as i32,
+        DynamicRange::Hdr10Pq => ErikaDynamicRange::Hdr10Pq as i32,
+        DynamicRange::Hlg => ErikaDynamicRange::Hlg as i32,
+        DynamicRange::UltraHdrGainMap => ErikaDynamicRange::UltraHdrGainMap as i32,
+    };
+    ErikaDynamicRangeStatus {
+        source_dynamic_range: to_c(status.source_dynamic_range),
+        active_dynamic_range: to_c(status.active_dynamic_range),
+        hdr_output_confirmed: status.hdr_output_confirmed,
+    }
+}
+
 #[cfg(any(
     target_os = "macos",
     any(target_os = "ios", target_os = "tvos"),
@@ -2345,6 +2387,28 @@ pub unsafe extern "C" fn erika_presenter_get_output_status(
     }
     with_presenter_mut(handle, |handle| {
         let status = output_status_to_c(handle.presenter.runtime_snapshot().output);
+        unsafe { *out_status = status };
+        ErikaStatus::Ok
+    })
+}
+
+#[cfg(any(
+    target_os = "macos",
+    any(target_os = "ios", target_os = "tvos"),
+    target_os = "windows",
+    target_os = "android",
+    target_env = "ohos"
+))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_presenter_get_dynamic_range_status(
+    handle: *mut ErikaPresenterHandle,
+    out_status: *mut ErikaDynamicRangeStatus,
+) -> ErikaStatus {
+    if out_status.is_null() {
+        return ErikaStatus::NullPointer;
+    }
+    with_presenter_mut(handle, |handle| {
+        let status = dynamic_range_status_to_c(handle.presenter.runtime_snapshot().output);
         unsafe { *out_status = status };
         ErikaStatus::Ok
     })
@@ -5706,6 +5770,7 @@ mod tests {
             direct_composition: true,
             desired_headroom: 0.0,
             fallback_reason: ErikaOutputFallbackReason::DisplayHdrUnsupported as i32,
+            native_data_space: -1,
         }
         .into();
 

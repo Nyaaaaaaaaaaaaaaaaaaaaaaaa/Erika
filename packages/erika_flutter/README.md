@@ -64,7 +64,7 @@ points the build phase at an explicit dylib to bundle instead of building.
 
 ## Native binaries
 
-The plugin downloads the matching `v0.1.8` native runtime from
+The plugin downloads the matching `v0.2.0` native runtime from
 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` by default on macOS, Windows, iOS, tvOS,
 Android, and OpenHarmony. `ERIKA_PREBUILT_REPOSITORY=owner/repo` overrides that
 source. Every archive is pinned by SHA-256; a missing or invalid fork archive
@@ -264,7 +264,8 @@ desired HDR headroom without changing the host window globally.
 
 ## HarmonyOS Setup
 
-The HarmonyOS module requires DevEco Studio's OpenHarmony Native SDK. Its CMake
+The HarmonyOS NEXT module requires the HarmonyOS 6 / API 20 SDK and remains
+compatible with HarmonyOS NEXT 5.1 / API 18. Its CMake
 build downloads and verifies `liberika_capi.so`, then packages it beside
 `liberika_flutter.so`. Rust and the `aarch64-unknown-linux-ohos` target are only
 required when `ERIKA_FORCE_SOURCE_BUILD=1` is explicitly selected.

@@ -55,7 +55,7 @@ Pod::Spec.new do |s|
   erika_link_flags = "$(inherited) #{erika_cabi_undefined_flags} -framework AVFoundation -framework AudioToolbox -framework QuartzCore -framework Metal -framework CoreVideo -framework CoreMedia -framework VideoToolbox -framework CoreText -framework CoreFoundation -framework CoreGraphics -framework Foundation -liconv -lbz2 -lz"
 
   s.name             = 'erika_flutter'
-  s.version          = '0.1.8'
+  s.version          = '0.2.0'
   s.summary          = 'Flutter embedder glue for the Erika Rust media engine.'
   s.description      = <<-DESC
 Flutter iOS AV1/static AVIF plugin that hosts a CAMetalLayer and drives Erika through its C ABI.

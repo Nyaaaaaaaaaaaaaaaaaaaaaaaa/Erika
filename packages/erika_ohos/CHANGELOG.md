@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-03
+
+- Added verified 10-bit BT.2020 PQ XComponent output with HDR metadata,
+  DisplaySoloist VSync, explicit SDR fallback, and output capability/status APIs.
+- Added static HEIF and JPEG base-image decode alongside cached static AVIF.
 
 ## 0.1.8
 

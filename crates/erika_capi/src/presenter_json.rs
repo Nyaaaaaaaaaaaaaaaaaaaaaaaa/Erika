@@ -138,7 +138,11 @@ unsafe fn invoke(
         "getOutputStatus" => {
             let mut status = ErikaOutputStatus::default();
             call_status(unsafe { erika_presenter_get_output_status(handle, &mut status) })?;
-            Ok(output_status_json(status))
+            let mut dynamic_range = ErikaDynamicRangeStatus::default();
+            call_status(unsafe {
+                erika_presenter_get_dynamic_range_status(handle, &mut dynamic_range)
+            })?;
+            Ok(output_status_json(status, dynamic_range))
         }
         "getPresenterStats" => {
             let mut stats = ErikaPresenterStats::default();
@@ -478,7 +482,7 @@ fn upscaler_status_json(status: ErikaUpscalerStatus) -> Value {
     })
 }
 
-fn output_status_json(status: ErikaOutputStatus) -> Value {
+fn output_status_json(status: ErikaOutputStatus, dynamic_range: ErikaDynamicRangeStatus) -> Value {
     json!({
         "requestedMode": status.requested_mode, "activeEncoding": status.active_encoding,
         "surfaceFormat": status.surface_format, "nativeDataSpace": status.native_data_space,
@@ -488,6 +492,9 @@ fn output_status_json(status: ErikaOutputStatus) -> Value {
         "fallbackReason": status.fallback_reason, "fallbackCount": status.fallback_count,
         "dataSpaceFailures": status.data_space_failures, "headroomUpdates": status.headroom_updates,
         "extendedLinearFrames": status.extended_linear_frames,
+        "sourceDynamicRange": dynamic_range.source_dynamic_range,
+        "activeDynamicRange": dynamic_range.active_dynamic_range,
+        "hdrOutputConfirmed": dynamic_range.hdr_output_confirmed,
     })
 }
 

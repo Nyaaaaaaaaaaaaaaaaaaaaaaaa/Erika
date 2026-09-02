@@ -54,11 +54,12 @@ interface ErikaMediaNavigation {
 
 const PLAYER_CHANNEL: string = 'erika_flutter/player';
 const EVENT_CHANNEL: string = 'erika_flutter/events';
-const FRAME_INTERVAL_MS: number = 16;
+const EVENT_POLL_INTERVAL_MS: number = 50;
 const STATE_CHANGED_EVENT_KIND: number = 1;
 const DURATION_CHANGED_EVENT_KIND: number = 2;
 const POSITION_CHANGED_EVENT_KIND: number = 3;
 const SYSTEM_MEDIA_NAVIGATION_EVENT_KIND: number = 13;
+const OUTPUT_STATUS_CHANGED_EVENT_KIND: number = 14;
 const PLAYING_STATE: number = 3;
 const PAUSED_STATE: number = 4;
 const STOPPED_STATE: number = 5;
@@ -72,6 +73,7 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
   private eventChannel: EventChannel | null = null;
   private eventSink: EventSink | null = null;
   private players: Set<number> = new Set();
+  private outputModes: Map<number, number> = new Map();
   private textures: Map<number, ErikaTexture> = new Map();
   private mediaMetadata: Map<number, ErikaMediaMetadata> = new Map();
   private mediaStates: Map<number, ErikaMediaState> = new Map();
@@ -80,7 +82,8 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
   private currentSession: avSession.AVSession | null = null;
   private sessionPromise: Promise<avSession.AVSession | null> | null = null;
   private sessionGeneration: number = 0;
-  private frameTimer: number = -1;
+  private eventTimer: number = -1;
+  private lastOutputStatus: Map<number, string> = new Map();
 
   getUniqueClassName(): string {
     return 'ErikaFlutterPlugin';
@@ -109,11 +112,11 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
         this.eventSink = null;
       },
     });
-    this.startFrameLoop();
+    this.startEventLoop();
   }
 
   onDetachedFromEngine(_binding: FlutterPluginBinding): void {
-    this.stopFrameLoop();
+    this.stopEventLoop();
     this.textures.forEach((texture: ErikaTexture, textureId: number): void => {
       if (texture.playerId > 0) {
         erikaNative.nativeDetachSurface(texture.playerId);
@@ -125,9 +128,11 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
       erikaNative.nativeDestroy(playerId);
     });
     this.players.clear();
+    this.outputModes.clear();
     this.mediaMetadata.clear();
     this.mediaStates.clear();
     this.mediaNavigation.clear();
+    this.lastOutputStatus.clear();
     this.currentPlayerId = 0;
     this.destroyAVSession();
     this.methodChannel?.setMethodCallHandler(null);
@@ -197,6 +202,10 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
       this.registerSubtitleMemoryFont(args, result);
       return;
     }
+    if (call.method === 'getHdrCapabilities') {
+      this.getHdrCapabilities(args, result);
+      return;
+    }
     if (this.isNativePlayerMethod(call.method)) {
       this.invokePlayer(call.method, args, result);
       return;
@@ -209,20 +218,24 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
     const headroom = this.numberArg(
       args,
       'edrHeadroom',
-      outputMode === 2 ? 4.0 : 1.0,
+      outputMode === 2 || outputMode === 4 ? 4.0 : 1.0,
     );
     const upscaler = this.numberArg(args, 'upscaler', 0);
     const playerId = erikaNative.nativeCreate(outputMode, headroom, upscaler) as number;
     if (playerId <= 0) {
       result.error(
         'ERIKA_ERROR',
-        'Erika OpenHarmony presenter creation failed: ' +
+        'Erika HarmonyOS NEXT presenter creation failed: ' +
           (erikaNative.nativeLastError() as string),
         null,
       );
       return;
     }
     this.players.add(playerId);
+    this.outputModes.set(
+      playerId,
+      outputMode === 0 ? 0 : outputMode === 3 ? 3 : 4,
+    );
     this.mediaStates.set(playerId, {
       playbackState: 0,
       positionMicros: 0,
@@ -250,6 +263,8 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
     this.mediaMetadata.delete(playerId);
     this.mediaStates.delete(playerId);
     this.mediaNavigation.delete(playerId);
+    this.outputModes.delete(playerId);
+    this.lastOutputStatus.delete(playerId);
     if (this.currentPlayerId === playerId) {
       this.currentPlayerId = 0;
       this.deactivateAVSession();
@@ -378,7 +393,7 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
         texture.height,
         texture.scale,
       ) as number;
-      if (!this.completeStatus(status, result, 'resize OpenHarmony surface')) {
+      if (!this.completeStatus(status, result, 'resize HarmonyOS NEXT surface')) {
         return;
       }
     }
@@ -416,12 +431,13 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
       texture.height,
       texture.scale,
     ) as number;
-    if (!this.completeStatus(status, result, 'attach OpenHarmony surface')) {
+    if (!this.completeStatus(status, result, 'attach HarmonyOS NEXT surface')) {
       return;
     }
     texture.playerId = playerId;
     result.success(null);
     this.drainEvents(playerId);
+    this.emitOutputStatusIfChanged(playerId);
   }
 
   private detachView(args: Map<string, ESObject>, result: MethodResult): void {
@@ -434,7 +450,7 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
     }
     const status = erikaNative.nativeDetachSurface(playerId) as number;
     texture.playerId = 0;
-    if (!this.completeStatus(status, result, 'detach OpenHarmony surface')) {
+    if (!this.completeStatus(status, result, 'detach HarmonyOS NEXT surface')) {
       return;
     }
     result.success(null);
@@ -461,7 +477,7 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
     if (width <= 0 || height <= 0) {
       result.error(
         'ERIKA_ERROR',
-        'Screenshot width and height are required before an OpenHarmony surface is attached',
+        'Screenshot width and height are required before a HarmonyOS NEXT surface is attached',
         null,
       );
       return;
@@ -521,9 +537,25 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
       );
       return false;
     }
+    if (method === 'getOutputStatus' && response.value !== undefined) {
+      response.value.requestedMode = this.outputModes.get(playerId) ?? 0;
+    }
     result.success(response.value ?? null);
     this.drainEvents(playerId);
     return true;
+  }
+
+  private getHdrCapabilities(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const playerId = this.numberArg(args, 'playerId', 0);
+    if (!this.players.has(playerId)) {
+      result.error('ERIKA_ERROR', 'Unknown Erika player ' + playerId, null);
+      return;
+    }
+    const raw = erikaNative.nativeGetHdrCapabilitiesJson(playerId) as string;
+    result.success(JSON.parse(raw) as ESObject);
   }
 
   private parseMediaMetadata(value: ESObject): ErikaMediaMetadata | null {
@@ -776,24 +808,48 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
     result.success(response[1] ?? 0);
   }
 
-  private startFrameLoop(): void {
-    if (this.frameTimer >= 0) {
+  private startEventLoop(): void {
+    if (this.eventTimer >= 0) {
       return;
     }
-    this.frameTimer = setInterval((): void => {
-      const frameTimeSeconds = Date.now() / 1000.0;
+    this.eventTimer = setTimeout((): void => {
+      this.eventTimer = -1;
       this.players.forEach((playerId: number): void => {
-        erikaNative.nativeRenderTick(playerId, frameTimeSeconds);
         this.drainEvents(playerId);
+        this.emitOutputStatusIfChanged(playerId);
       });
-    }, FRAME_INTERVAL_MS);
+      this.startEventLoop();
+    }, EVENT_POLL_INTERVAL_MS);
   }
 
-  private stopFrameLoop(): void {
-    if (this.frameTimer >= 0) {
-      clearInterval(this.frameTimer);
-      this.frameTimer = -1;
+  private stopEventLoop(): void {
+    if (this.eventTimer >= 0) {
+      clearTimeout(this.eventTimer);
+      this.eventTimer = -1;
     }
+  }
+
+  private emitOutputStatusIfChanged(playerId: number): void {
+    const sink = this.eventSink;
+    if (!sink) {
+      return;
+    }
+    const raw = erikaNative.nativeInvoke(playerId, 'getOutputStatus', '{}') as string;
+    const response = JSON.parse(raw) as NativeResponse;
+    if (!response.ok || response.value === undefined) {
+      return;
+    }
+    response.value.requestedMode = this.outputModes.get(playerId) ?? 0;
+    const serialized = JSON.stringify(response.value);
+    if (this.lastOutputStatus.get(playerId) === serialized) {
+      return;
+    }
+    this.lastOutputStatus.set(playerId, serialized);
+    sink.success({
+      playerId: playerId,
+      kind: OUTPUT_STATUS_CHANGED_EVENT_KIND,
+      outputStatus: response.value,
+    });
   }
 
   private drainAllEvents(): void {

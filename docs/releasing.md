@@ -2,11 +2,10 @@
 
 > Translations: [中文](releasing.zh.md) · [日本語](releasing.ja.md)
 
-> Fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` has not published any native,
-> pub.dev, OHPM, or Swift artifact. Its ecosystem publishing workflows are
-> guarded to run only in `AimesSoft/Erika`; this fork may use the native GitHub
-> Release workflow for a future organization-owned release, but must never write
-> to upstream package channels or `AimesSoft/ErikaSwift`.
+> Fork policy: `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` publishes organization-owned
+> native binaries only through its GitHub Releases. Its ecosystem publishing
+> workflows are guarded to run only in `AimesSoft/Erika`; this fork must never
+> write to pub.dev, OHPM, upstream package channels, or `AimesSoft/ErikaSwift`.
 
 This describes how prebuilt `erika_capi` binaries are published so that other
 projects can link Erika without building it from source.
@@ -88,7 +87,7 @@ versions and all pinned SHA-256 values after the GitHub Release and its
 `SHA256SUMS` asset exist. A normal release now starts with one core tag:
 
 ```sh
-VERSION=0.1.8
+VERSION=0.2.0
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
@@ -126,7 +125,7 @@ The release is fully automated by
    section, and bump `version` in the root `Cargo.toml` if appropriate.
 2. Tag and push:
    ```sh
-   VERSION=0.1.8
+   VERSION=0.2.0
    git tag "v${VERSION}"
    git push origin "v${VERSION}"
    ```

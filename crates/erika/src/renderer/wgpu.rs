@@ -31,7 +31,8 @@ use crate::core::ColorPrimaries;
 use crate::core::WgpuSurfaceKind;
 use crate::core::{
     LumaUpscalerBackendStatus, PlatformSurface, PlayerError, PlayerVideoFrame, RenderFrameContext,
-    RendererBackend, RendererRuntimeStats, Result, SurfaceOutputCapabilities, WgpuSurfaceHandle,
+    RendererBackend, RendererRuntimeStats, Result, SurfaceOutputCapabilities, TransferFunction,
+    WgpuSurfaceHandle,
 };
 use crate::danmaku::{
     DanmakuAtlasUpdate, DanmakuGlyphAtlas, DanmakuGlyphInstance, DanmakuRenderPlan,
@@ -50,8 +51,8 @@ use crate::renderer::ohos_vulkan::{
     OhosVulkanInterop, retire_ohb_conversion_after_submission,
 };
 use crate::renderer::output::{
-    ActiveOutputEncoding, OutputDescription, OutputFallbackReason, OutputMode, OutputRuntimeStatus,
-    OutputSurfaceFormat,
+    ActiveOutputEncoding, DynamicRange, OutputColorSpace, OutputDescription, OutputFallbackReason,
+    OutputMode, OutputRuntimeStatus, OutputSurfaceFormat,
 };
 use crate::renderer::pipeline::{LumaUpscalerMode, SourceColorState, VideoRenderPipeline};
 use crate::renderer::presentation::{PresentationLayout, PresentationRect};
@@ -75,6 +76,7 @@ pub struct WgpuRendererStats {
     pub cpu_video_frame_fallbacks: u64,
     pub hdr_source_frames: u64,
     pub sdr_tonemap_frames: u64,
+    pub hdr10_output_frames: u64,
     pub danmaku_passes: u64,
     pub danmaku_items: u64,
     pub attached: bool,
@@ -624,16 +626,35 @@ fn select_wgpu_surface_output(
         OutputMode::ExtendedLinear { .. } if backend != wgpu::Backend::Vulkan => {
             OutputFallbackReason::WgpuBackendNotVulkan
         }
+        #[cfg(target_env = "ohos")]
+        OutputMode::ExtendedLinear { .. }
+            if !formats.contains(&wgpu::TextureFormat::Rgb10a2Unorm) =>
+        {
+            OutputFallbackReason::TenBitSurfaceFormatUnavailable
+        }
+        #[cfg(not(target_env = "ohos"))]
         OutputMode::ExtendedLinear { .. }
             if !formats.contains(&wgpu::TextureFormat::Rgba16Float) =>
         {
             OutputFallbackReason::Rgba16FloatSurfaceFormatUnavailable
         }
         OutputMode::ExtendedLinear { headroom } => {
+            #[cfg(target_env = "ohos")]
+            let (format, output) = (
+                wgpu::TextureFormat::Rgb10a2Unorm,
+                OutputDescription::hdr10(),
+            );
+            #[cfg(not(target_env = "ohos"))]
+            let (format, output) = (
+                wgpu::TextureFormat::Rgba16Float,
+                OutputDescription::extended_linear(headroom),
+            );
+            #[cfg(target_env = "ohos")]
+            let _ = headroom;
             return Some(WgpuSurfaceOutputSelection {
-                format: wgpu::TextureFormat::Rgba16Float,
+                format,
                 sdr_format,
-                output: OutputDescription::extended_linear(headroom),
+                output,
                 fallback_reason: OutputFallbackReason::None,
             });
         }
@@ -1455,10 +1476,12 @@ impl WgpuRenderer {
     }
 
     fn observe_attached_output(&mut self, attached: AttachedOutputState, count_fallback: bool) {
-        self.output_status.active_encoding = if attached.output.extended_linear {
-            ActiveOutputEncoding::AndroidExtendedLinearScRgb
-        } else {
-            ActiveOutputEncoding::SdrSrgb
+        self.output_status.active_encoding = match attached.output.color_space {
+            OutputColorSpace::Bt2020Pq => ActiveOutputEncoding::Hdr10Pq,
+            _ if attached.output.extended_linear => {
+                ActiveOutputEncoding::AndroidExtendedLinearScRgb
+            }
+            _ => ActiveOutputEncoding::SdrSrgb,
         };
         self.output_status.surface_format = attached.output.surface_format;
         self.output_status.native_data_space = attached.native_data_space;
@@ -1477,6 +1500,11 @@ impl WgpuRenderer {
             true
         };
         self.output_status.extended_linear_active = attached.output.extended_linear;
+        self.output_status.active_dynamic_range = match attached.output.color_space {
+            OutputColorSpace::Bt2020Pq => DynamicRange::Hdr10Pq,
+            OutputColorSpace::Srgb | OutputColorSpace::ExtendedSrgbLinear => DynamicRange::Sdr,
+        };
+        self.output_status.hdr_output_confirmed = false;
         self.output_status.fallback_reason = attached.fallback_reason;
         if count_fallback && attached.fallback_reason != OutputFallbackReason::None {
             self.output_status.fallback_count = self.output_status.fallback_count.saturating_add(1);
@@ -1546,6 +1574,8 @@ impl WgpuRenderer {
         self.output_status.active_headroom = 1.0;
         self.output_status.active_headroom_known = false;
         self.output_status.extended_linear_active = false;
+        self.output_status.active_dynamic_range = DynamicRange::Unknown;
+        self.output_status.hdr_output_confirmed = false;
     }
 
     pub fn adapter_info(&self) -> wgpu::AdapterInfo {
@@ -1892,12 +1922,18 @@ impl WgpuRenderer {
             .as_ref()
             .map_or_else(OutputDescription::sdr, |surface| surface.output);
         let pipeline = VideoRenderPipeline::new(source, output.target);
+        self.output_status.source_dynamic_range = match source.transfer {
+            TransferFunction::Pq => DynamicRange::Hdr10Pq,
+            TransferFunction::Hlg => DynamicRange::Hlg,
+            TransferFunction::Unknown => DynamicRange::Unknown,
+            TransferFunction::Srgb | TransferFunction::Bt1886 => DynamicRange::Sdr,
+        };
         if source.is_hdr() {
             self.stats.hdr_source_frames += 1;
-            if !output.extended_linear && pipeline.requires_tone_mapping() {
+            if output.color_space == OutputColorSpace::Srgb && pipeline.requires_tone_mapping() {
                 self.stats.sdr_tonemap_frames += 1;
             }
-            if !output.extended_linear && !self.sdr_hdr_output_reported {
+            if output.color_space == OutputColorSpace::Srgb && !self.sdr_hdr_output_reported {
                 self.sdr_hdr_output_reported = true;
                 crate::trace::diagnostic(
                     serde_json::json!({
@@ -3627,7 +3663,11 @@ impl WgpuRenderer {
                 data_space_failure: false,
                 #[cfg(target_os = "android")]
                 native_data_space: data_space_verification.map_or(-1, |value| value.after),
-                #[cfg(not(target_os = "android"))]
+                #[cfg(target_env = "ohos")]
+                // The native bridge sets and reads back the HarmonyOS NEXT
+                // NativeWindow color space before advertising HDR capability.
+                native_data_space: handle.output_capabilities.native_data_space,
+                #[cfg(not(any(target_os = "android", target_env = "ohos")))]
                 native_data_space: -1,
                 handle,
                 #[cfg(target_os = "android")]
@@ -4059,6 +4099,21 @@ impl RendererBackend for WgpuRenderer {
             self.reconfigure_surface();
         }
         self.stats.rendered_frames += 1;
+        let source_is_hdr = self
+            .current_video
+            .as_ref()
+            .and_then(|video| video.source_color)
+            .is_some_and(|source| source.is_hdr());
+        if output.color_space == OutputColorSpace::Bt2020Pq {
+            self.output_status.active_dynamic_range = DynamicRange::Hdr10Pq;
+            self.output_status.hdr_output_confirmed = source_is_hdr;
+            if source_is_hdr {
+                self.stats.hdr10_output_frames = self.stats.hdr10_output_frames.saturating_add(1);
+            }
+        } else {
+            self.output_status.hdr_output_confirmed = false;
+            self.output_status.active_dynamic_range = DynamicRange::Sdr;
+        }
         if output.extended_linear {
             self.output_status.extended_linear_frames =
                 self.output_status.extended_linear_frames.saturating_add(1);
@@ -4165,12 +4220,12 @@ impl RendererBackend for WgpuRenderer {
             shared_handle_video_frames: stats.shared_handle_video_frames,
             cpu_video_frame_fallbacks: stats.cpu_video_frame_fallbacks,
             hdr_source_frames: stats.hdr_source_frames,
-            hdr10_output_frames: 0,
+            hdr10_output_frames: stats.hdr10_output_frames,
             sdr_tonemap_frames: stats.sdr_tonemap_frames,
             hdr10_metadata_updates: 0,
             hdr10_metadata_failures: 0,
             hdr10_output_failures: 0,
-            hdr10_output_active: false,
+            hdr10_output_active: self.output_status.hdr_output_confirmed,
         }
     }
 
@@ -5143,6 +5198,7 @@ mod tests {
             direct_composition: true,
             desired_headroom: 4.0,
             fallback_reason: OutputFallbackReason::None,
+            native_data_space: -1,
         };
         let formats = [
             wgpu::TextureFormat::Rgba8Unorm,
@@ -5198,6 +5254,7 @@ mod tests {
                 direct_composition: true,
                 desired_headroom: 0.0,
                 fallback_reason: OutputFallbackReason::DisplayHdrUnsupported,
+                native_data_space: -1,
             },
             wgpu::Backend::Vulkan,
             &formats,
@@ -5215,6 +5272,7 @@ mod tests {
                 direct_composition: true,
                 desired_headroom: 0.0,
                 fallback_reason: OutputFallbackReason::NativeWindowDataSpaceApiUnavailable,
+                native_data_space: -1,
             },
             wgpu::Backend::Vulkan,
             &formats,
@@ -5234,6 +5292,7 @@ mod tests {
             direct_composition: true,
             desired_headroom: 0.0,
             fallback_reason: OutputFallbackReason::None,
+            native_data_space: -1,
         };
         assert_eq!(
             effective_extended_linear_headroom(requested, auto, OutputHeadroomState::default(),),
@@ -5288,6 +5347,7 @@ mod tests {
                 direct_composition: true,
                 desired_headroom: 4.0,
                 fallback_reason: OutputFallbackReason::None,
+                native_data_space: -1,
             },
             wgpu::Backend::Vulkan,
             &[

@@ -1,7 +1,7 @@
 {
   "name": "erika_flutter",
-  "version": "0.1.8",
-  "description": "Erika AV1 video and static AVIF Flutter plugin for OpenHarmony",
+  "version": "0.2.0",
+  "description": "Erika HDR AV1 video and static AVIF/HEIF/JPEG Flutter plugin for HarmonyOS NEXT",
   "main": "index.ets",
   "author": "Aimesoft",
   "license": "MPL-2.0",

@@ -1,6 +1,6 @@
 {
-  "modelVersion": "5.1.0",
+  "modelVersion": "6.0.0",
   "name": "erika-ohos-ci",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "dependencies": {}
 }

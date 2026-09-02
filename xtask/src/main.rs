@@ -197,10 +197,10 @@ impl NativeDependencyProfile {
                 "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,av1,obu,ivf",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf,image2,jpeg_pipe",
                 "--enable-bsf=extract_extradata",
-                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
-                "--enable-decoder=aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
+                "--enable-parser=av1,hevc,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
+                "--enable-decoder=hevc,mjpeg,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
             Self::GplFull => &[
                 "--enable-gpl",
@@ -214,10 +214,10 @@ impl NativeDependencyProfile {
                 "--disable-everything",
                 "--enable-zlib",
                 "--enable-protocol=file",
-                "--enable-demuxer=mov,matroska,av1,obu,ivf",
+                "--enable-demuxer=mov,matroska,av1,obu,ivf,image2,jpeg_pipe",
                 "--enable-bsf=extract_extradata",
-                "--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
-                "--enable-decoder=aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
+                "--enable-parser=av1,hevc,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio",
+                "--enable-decoder=hevc,mjpeg,aac,ac3,eac3,dca,truehd,mlp,opus,vorbis,flac,mp3,pcm_s16le,pcm_s24le,pcm_s32le",
             ],
         }
     }
@@ -2304,8 +2304,14 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         ));
         configure.env("ANDROID_NDK_HOME", &config.ndk_root);
     } else if let Some(config) = ohos_toolchain(options.target)? {
-        configure.arg(format!("--cc={}", ffmpeg_flag_path_arg(&config.clang)));
-        configure.arg(format!("--cxx={}", ffmpeg_flag_path_arg(&config.clangxx)));
+        configure.arg(format!(
+            "--cc={}",
+            ohos_ffmpeg_compiler_command(&config, false)?
+        ));
+        configure.arg(format!(
+            "--cxx={}",
+            ohos_ffmpeg_compiler_command(&config, true)?
+        ));
         configure.arg(format!("--ar={}", ffmpeg_flag_path_arg(&config.ar)));
         configure.arg(format!("--ranlib={}", ffmpeg_flag_path_arg(&config.ranlib)));
         configure.arg(format!("--strip={}", ffmpeg_flag_path_arg(&config.strip)));
@@ -2313,10 +2319,12 @@ fn build_ffmpeg(layout: &WorkspaceLayout, options: DepsOptions) -> Result<()> {
         configure.arg("--target-os=linux");
         configure.arg("--enable-cross-compile");
         configure.arg("--arch=aarch64");
-        configure.arg(format!(
-            "--sysroot={}",
-            path_to_forward_slashes(&config.sysroot)
-        ));
+        if !cfg!(windows) {
+            configure.arg(format!(
+                "--sysroot={}",
+                path_to_forward_slashes(&config.sysroot)
+            ));
+        }
         if let Some(host_cc) = ffmpeg_ohos_host_cc(&config)? {
             configure.arg(format!("--host-cc={host_cc}"));
         }
@@ -2727,12 +2735,20 @@ fn ohos_toolchain(target: NativeTarget) -> Result<Option<OhosToolchain>> {
     let cmake_toolchain_file = native_root.join("build/cmake/ohos.toolchain.cmake");
     let clang = required_executable_in_dir(
         &bin_dir,
-        "aarch64-unknown-linux-ohos-clang",
+        if cfg!(windows) {
+            "clang"
+        } else {
+            "aarch64-unknown-linux-ohos-clang"
+        },
         "OpenHarmony C compiler",
     )?;
     let clangxx = required_executable_in_dir(
         &bin_dir,
-        "aarch64-unknown-linux-ohos-clang++",
+        if cfg!(windows) {
+            "clang++"
+        } else {
+            "aarch64-unknown-linux-ohos-clang++"
+        },
         "OpenHarmony C++ compiler",
     )?;
     let ar = required_executable_in_dir(&bin_dir, "llvm-ar", "OpenHarmony archiver")?;
@@ -2806,15 +2822,68 @@ fn ffmpeg_ohos_host_cc(config: &OhosToolchain) -> Result<Option<String>> {
     if !cfg!(windows) {
         return Ok(None);
     }
-    let clang =
-        required_executable_in_dir(&config.bin_dir, "clang", "OpenHarmony host Clang compiler")?;
-    Ok(Some(format!(
-        "{} --target={} -fuse-ld=link",
-        ffmpeg_flag_path_arg(&clang),
-        windows_host_target()
-            .triple()
-            .context("Windows host target must have a Rust triple")?
-    )))
+    let target = windows_host_target()
+        .triple()
+        .context("Windows host target must have a Rust triple")?;
+    ohos_ffmpeg_shim(
+        config,
+        "host-clang",
+        false,
+        &["-target", target, "-fuse-ld=link"],
+    )
+    .map(Some)
+}
+
+fn ohos_ffmpeg_compiler_command(config: &OhosToolchain, cxx: bool) -> Result<String> {
+    if !cfg!(windows) {
+        return Ok(ffmpeg_flag_path_arg(if cxx {
+            &config.clangxx
+        } else {
+            &config.clang
+        }));
+    }
+    ohos_ffmpeg_shim(
+        config,
+        if cxx {
+            "target-clangxx"
+        } else {
+            "target-clang"
+        },
+        cxx,
+        &[
+            "-target",
+            "aarch64-linux-ohos",
+            "--sysroot",
+            config
+                .sysroot
+                .to_str()
+                .context("OpenHarmony sysroot is not UTF-8")?,
+            "-D__MUSL__",
+        ],
+    )
+}
+
+fn ohos_ffmpeg_shim(
+    config: &OhosToolchain,
+    name: &str,
+    cxx: bool,
+    arguments: &[&str],
+) -> Result<String> {
+    let directory = env::temp_dir().join("erika-ohos-ffmpeg-tool-shims");
+    fs::create_dir_all(&directory).with_context(|| format!("create {}", directory.display()))?;
+    let path = directory.join(format!("{name}.sh"));
+    let compiler = if cxx { &config.clangxx } else { &config.clang };
+    let mut script = format!(
+        "#!/bin/sh\nexec {}",
+        shell_escape(&path_to_forward_slashes(compiler))
+    );
+    for argument in arguments {
+        script.push(' ');
+        script.push_str(&shell_escape(&argument.replace('\\', "/")));
+    }
+    script.push_str(" \"$@\"\n");
+    fs::write(&path, script).with_context(|| format!("write {}", path.display()))?;
+    Ok(format!("sh {}", path_to_forward_slashes(&path)))
 }
 
 fn android_api_level() -> Result<u32> {

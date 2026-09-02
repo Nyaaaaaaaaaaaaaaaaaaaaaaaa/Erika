@@ -7,3 +7,4 @@ export const nativeResizeSurface: (playerId: number, width: number, height: numb
 export const nativeDetachSurface: (playerId: number) => number;
 export const nativeRenderTick: (playerId: number, timeSeconds: number) => string;
 export const nativePollEvent: (playerId: number) => string | null;
+export const nativeGetHdrCapabilitiesJson: (playerId: number) => string;

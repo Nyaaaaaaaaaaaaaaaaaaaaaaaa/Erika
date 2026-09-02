@@ -1,4 +1,4 @@
-name: OpenHarmony ArkTS SDK
+name: HarmonyOS NEXT ArkTS SDK
 
 on:
   pull_request:
@@ -24,7 +24,7 @@ on:
       version:
         description: Erika version to package
         required: true
-        default: "0.1.8"
+        default: "0.2.0"
         type: string
       publish:
         description: Publish the validated HAR to OHPM
@@ -55,7 +55,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ERIKA_NATIVE_VERSION: "${{ inputs.version || '0.1.8' }}"
+  ERIKA_NATIVE_VERSION: "${{ inputs.version || '0.2.0' }}"
   ERIKA_NATIVE_PROFILE: lgpl
   ERIKA_NATIVE_TARGET: aarch64-unknown-linux-ohos
   OHPM_CLI_URL: "https://repo.huaweicloud.com/harmonyos/ohpm/5.1.0/commandline-tools-linux-x64-5.1.0.840.zip"
@@ -63,7 +63,7 @@ env:
 
 jobs:
   package:
-    name: Build ArkTS package (OpenHarmony arm64)
+    name: Build ArkTS package (HarmonyOS NEXT arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -78,7 +78,7 @@ jobs:
       - uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad
         id: ohos_sdk
         with:
-          version: "5.1.0"
+          version: "6.0.0"
           components: "native;ets;js;toolchains;previewer"
           fixup-path: true
           cache: true
@@ -243,7 +243,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: erika-ohos-${{ inputs.version || '0.1.8' }}
+          name: erika-ohos-${{ inputs.version || '0.2.0' }}
           path: |
             ${{ runner.temp }}/erika.har
             ${{ runner.temp }}/erika-ohos-smoke.hap
@@ -263,7 +263,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: erika-ohos-${{ inputs.version || '0.1.8' }}
+          name: erika-ohos-${{ inputs.version || '0.2.0' }}
           path: ${{ runner.temp }}/erika-ohos-release
 
       - uses: actions/setup-node@v4

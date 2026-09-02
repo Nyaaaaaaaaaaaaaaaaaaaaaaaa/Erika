@@ -1,4 +1,4 @@
-import { ErikaNativeResponse, ErikaPlayer } from 'erika';
+import { ErikaPlayer } from 'erika';
 
 class ErikaSurfaceController extends XComponentController {
   private readonly player: ErikaPlayer = new ErikaPlayer();
@@ -35,10 +35,6 @@ class ErikaSurfaceController extends XComponentController {
   open(uri: string): void {
     this.pendingUri = uri;
     this.startPendingUri();
-  }
-
-  renderFrame(timeSeconds: number): ErikaNativeResponse {
-    return this.player.renderTick(timeSeconds);
   }
 
   private startPendingUri(): void {

@@ -1,4 +1,4 @@
-name: OpenHarmony
+name: HarmonyOS NEXT
 
 on:
   pull_request:
@@ -39,10 +39,12 @@ env:
   ERIKA_NATIVE_PROFILE: lgpl
   ERIKA_NATIVE_TARGET: aarch64-unknown-linux-ohos
   OHOS_COMPATIBLE_SDK_VERSION: "18"
+  OHOS_COMPILE_SDK_VERSION: "20"
+  OHOS_TARGET_SDK_VERSION: "20"
 
 jobs:
   native:
-    name: OpenHarmony native (arm64)
+    name: HarmonyOS NEXT native (arm64)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -50,11 +52,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: aarch64-unknown-linux-ohos
-      - name: Setup OpenHarmony SDK
+      - name: Setup HarmonyOS NEXT SDK
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad # v1.0.1
         with:
-          version: "5.1.0"
+          version: "6.0.0"
           components: native
           cache: true
       - name: Install native build tools

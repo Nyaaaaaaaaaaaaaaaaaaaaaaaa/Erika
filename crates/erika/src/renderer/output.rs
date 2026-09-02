@@ -116,6 +116,33 @@ pub enum ActiveOutputEncoding {
     Hdr10Pq,
 }
 
+/// Stable, platform-neutral source/output dynamic-range vocabulary.
+///
+/// The numeric representation is mirrored by the C and Dart APIs. Keep the
+/// existing values stable and append any future signal types at the end.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DynamicRange {
+    #[default]
+    Unknown = 0,
+    Sdr = 1,
+    Hdr10Pq = 2,
+    Hlg = 3,
+    UltraHdrGainMap = 4,
+}
+
+impl DynamicRange {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Sdr => "sdr",
+            Self::Hdr10Pq => "hdr10_pq",
+            Self::Hlg => "hlg",
+            Self::UltraHdrGainMap => "ultra_hdr_gain_map",
+        }
+    }
+}
+
 impl ActiveOutputEncoding {
     pub const fn label(self) -> &'static str {
         match self {
@@ -144,6 +171,10 @@ pub enum OutputFallbackReason {
     ScrgbDataSpaceVerificationFailed = 6,
     SurfaceConfigureFailed = 7,
     LegacyAppleEdrUnsupported = 8,
+    TenBitSurfaceFormatUnavailable = 9,
+    HdrWindowConfigurationFailed = 10,
+    HdrMetadataVerificationFailed = 11,
+    NativeVsyncUnavailable = 12,
 }
 
 impl OutputFallbackReason {
@@ -157,6 +188,10 @@ impl OutputFallbackReason {
             6 => Self::ScrgbDataSpaceVerificationFailed,
             7 => Self::SurfaceConfigureFailed,
             8 => Self::LegacyAppleEdrUnsupported,
+            9 => Self::TenBitSurfaceFormatUnavailable,
+            10 => Self::HdrWindowConfigurationFailed,
+            11 => Self::HdrMetadataVerificationFailed,
+            12 => Self::NativeVsyncUnavailable,
             _ => Self::None,
         }
     }
@@ -172,6 +207,10 @@ impl OutputFallbackReason {
             Self::ScrgbDataSpaceVerificationFailed => "scrgb_dataspace_verification_failed",
             Self::SurfaceConfigureFailed => "surface_configure_failed",
             Self::LegacyAppleEdrUnsupported => "legacy_apple_edr_unsupported",
+            Self::TenBitSurfaceFormatUnavailable => "ten_bit_surface_format_unavailable",
+            Self::HdrWindowConfigurationFailed => "hdr_window_configuration_failed",
+            Self::HdrMetadataVerificationFailed => "hdr_metadata_verification_failed",
+            Self::NativeVsyncUnavailable => "native_vsync_unavailable",
         }
     }
 }
@@ -191,6 +230,11 @@ pub struct OutputRuntimeStatus {
     pub data_space_failures: u64,
     pub headroom_updates: u64,
     pub extended_linear_frames: u64,
+    pub source_dynamic_range: DynamicRange,
+    pub active_dynamic_range: DynamicRange,
+    /// True only after an HDR frame has been presented through a verified HDR
+    /// surface. Source metadata alone must never make this true.
+    pub hdr_output_confirmed: bool,
 }
 
 impl OutputRuntimeStatus {
@@ -219,6 +263,9 @@ impl Default for OutputRuntimeStatus {
             data_space_failures: 0,
             headroom_updates: 0,
             extended_linear_frames: 0,
+            source_dynamic_range: DynamicRange::Unknown,
+            active_dynamic_range: DynamicRange::Unknown,
+            hdr_output_confirmed: false,
         }
     }
 }

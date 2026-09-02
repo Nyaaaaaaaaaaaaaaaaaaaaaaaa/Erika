@@ -1,7 +1,7 @@
 {
   "name": "erika",
-  "version": "0.1.8",
-  "description": "Native ArkTS AV1 video and static AVIF SDK powered by Erika",
+  "version": "0.2.0",
+  "description": "Native ArkTS HDR AV1 video and static AVIF/HEIF/JPEG SDK for HarmonyOS NEXT",
   "main": "Index.ets",
   "author": {
     "name": "Shinokawa",
@@ -12,7 +12,7 @@
   "keywords": [
     "media",
     "video-player",
-    "harmonyos",
-    "openharmony"
+    "harmonyos-next",
+    "hdr"
   ]
 }

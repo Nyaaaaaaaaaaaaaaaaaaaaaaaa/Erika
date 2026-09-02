@@ -21,11 +21,11 @@ class ErikaMediaMetadata {
   final Uint8List? artwork;
 
   Map<String, Object> toMap() => <String, Object>{
-        'title': title,
-        if (artist != null) 'artist': artist!,
-        if (album != null) 'album': album!,
-        if (artwork != null) 'artwork': artwork!,
-      };
+    'title': title,
+    if (artist != null) 'artist': artist!,
+    if (album != null) 'album': album!,
+    if (artwork != null) 'artwork': artwork!,
+  };
 }
 
 /// Subtitle text colour Erika falls back to, as `0xRRGGBBAA`: opaque white.
@@ -48,7 +48,8 @@ const int kErikaSubtitleOverrideBorder = 1 << 6;
 const int kErikaSubtitleOverrideAlignment = 1 << 7;
 const int kErikaSubtitleOverrideMargins = 1 << 8;
 const int kErikaSubtitleOverrideBlur = 1 << 11;
-const int kErikaSubtitleOverrideAll = kErikaSubtitleOverrideFontSizeFields |
+const int kErikaSubtitleOverrideAll =
+    kErikaSubtitleOverrideFontSizeFields |
     kErikaSubtitleOverrideFontName |
     kErikaSubtitleOverrideColors |
     kErikaSubtitleOverrideAttributes |
@@ -59,9 +60,12 @@ const int kErikaSubtitleOverrideAll = kErikaSubtitleOverrideFontSizeFields |
 
 enum ErikaOutputMode {
   sdr(0),
+  auto(3),
+  preferHdr(4),
+  @Deprecated('Use auto or preferHdr; platform encoding is now internal.')
   appleEdr(1),
-  extendedLinear(2),
-  auto(3);
+  @Deprecated('Use auto or preferHdr; platform encoding is now internal.')
+  extendedLinear(2);
 
   const ErikaOutputMode(this.nativeValue);
 
@@ -72,6 +76,7 @@ enum ErikaOutputMode {
       1 => ErikaOutputMode.appleEdr,
       2 => ErikaOutputMode.extendedLinear,
       3 => ErikaOutputMode.auto,
+      4 => ErikaOutputMode.preferHdr,
       _ => ErikaOutputMode.sdr,
     };
   }
@@ -146,6 +151,10 @@ enum ErikaOutputFallbackReason {
   scrgbDataSpaceVerificationFailed(6, 'scrgb_dataspace_verification_failed'),
   surfaceConfigureFailed(7, 'surface_configure_failed'),
   legacyAppleEdrUnsupported(8, 'legacy_apple_edr_unsupported'),
+  tenBitSurfaceFormatUnavailable(9, 'ten_bit_surface_format_unavailable'),
+  hdrWindowConfigurationFailed(10, 'hdr_window_configuration_failed'),
+  hdrMetadataVerificationFailed(11, 'hdr_metadata_verification_failed'),
+  nativeVsyncUnavailable(12, 'native_vsync_unavailable'),
   unknown(-1, 'unknown');
 
   const ErikaOutputFallbackReason(this.nativeValue, this.label);
@@ -164,6 +173,10 @@ enum ErikaOutputFallbackReason {
       6 => ErikaOutputFallbackReason.scrgbDataSpaceVerificationFailed,
       7 => ErikaOutputFallbackReason.surfaceConfigureFailed,
       8 => ErikaOutputFallbackReason.legacyAppleEdrUnsupported,
+      9 => ErikaOutputFallbackReason.tenBitSurfaceFormatUnavailable,
+      10 => ErikaOutputFallbackReason.hdrWindowConfigurationFailed,
+      11 => ErikaOutputFallbackReason.hdrMetadataVerificationFailed,
+      12 => ErikaOutputFallbackReason.nativeVsyncUnavailable,
       _ => ErikaOutputFallbackReason.unknown,
     };
   }
@@ -184,6 +197,9 @@ class ErikaOutputStatus {
     required this.dataSpaceFailures,
     required this.headroomUpdates,
     required this.extendedLinearFrames,
+    required this.sourceDynamicRange,
+    required this.activeDynamicRange,
+    required this.hdrOutputConfirmed,
   });
 
   final ErikaOutputMode requestedMode;
@@ -199,6 +215,12 @@ class ErikaOutputStatus {
   final int dataSpaceFailures;
   final int headroomUpdates;
   final int extendedLinearFrames;
+  final ErikaDynamicRange sourceDynamicRange;
+  final ErikaDynamicRange activeDynamicRange;
+
+  /// True only after a decoded HDR frame has been presented by a verified HDR
+  /// output path. A resource's HDR declaration alone is insufficient.
+  final bool hdrOutputConfirmed;
 
   factory ErikaOutputStatus.fromMap(Map<dynamic, dynamic> map) {
     return ErikaOutputStatus(
@@ -223,8 +245,90 @@ class ErikaOutputStatus {
       dataSpaceFailures: (map['dataSpaceFailures'] as num?)?.toInt() ?? 0,
       headroomUpdates: (map['headroomUpdates'] as num?)?.toInt() ?? 0,
       extendedLinearFrames: (map['extendedLinearFrames'] as num?)?.toInt() ?? 0,
+      sourceDynamicRange: ErikaDynamicRange.fromNativeValue(
+        (map['sourceDynamicRange'] as num?)?.toInt() ?? 0,
+      ),
+      activeDynamicRange: ErikaDynamicRange.fromNativeValue(
+        (map['activeDynamicRange'] as num?)?.toInt() ?? 0,
+      ),
+      hdrOutputConfirmed: map['hdrOutputConfirmed'] == true,
     );
   }
+
+  ErikaOutputStatus withRequestedMode(ErikaOutputMode mode) {
+    return ErikaOutputStatus(
+      requestedMode: mode,
+      activeEncoding: activeEncoding,
+      surfaceFormat: surfaceFormat,
+      nativeDataSpace: nativeDataSpace,
+      requestedHeadroom: requestedHeadroom,
+      activeHeadroom: activeHeadroom,
+      activeHeadroomKnown: activeHeadroomKnown,
+      extendedLinearActive: extendedLinearActive,
+      fallbackReason: fallbackReason,
+      fallbackCount: fallbackCount,
+      dataSpaceFailures: dataSpaceFailures,
+      headroomUpdates: headroomUpdates,
+      extendedLinearFrames: extendedLinearFrames,
+      sourceDynamicRange: sourceDynamicRange,
+      activeDynamicRange: activeDynamicRange,
+      hdrOutputConfirmed: hdrOutputConfirmed,
+    );
+  }
+}
+
+class ErikaHdrCapabilities {
+  const ErikaHdrCapabilities({
+    required this.known,
+    required this.supportedDynamicRanges,
+    required this.hdrSurfaceSupported,
+    required this.tenBitSurfaceSupported,
+    required this.hardwareAv1DecodeSupported,
+    required this.hardwareAv1DecodeKnown,
+    required this.nativeVsyncSupported,
+    required this.fallbackReason,
+  });
+
+  const ErikaHdrCapabilities.unknown()
+    : known = false,
+      supportedDynamicRanges = const <ErikaDynamicRange>[],
+      hdrSurfaceSupported = false,
+      tenBitSurfaceSupported = false,
+      hardwareAv1DecodeSupported = false,
+      hardwareAv1DecodeKnown = false,
+      nativeVsyncSupported = false,
+      fallbackReason = ErikaOutputFallbackReason.unknown;
+
+  factory ErikaHdrCapabilities.fromMap(Map<dynamic, dynamic> map) {
+    final rawRanges = map['supportedDynamicRanges'];
+    return ErikaHdrCapabilities(
+      known: map['known'] == true,
+      supportedDynamicRanges: rawRanges is List
+          ? List<ErikaDynamicRange>.unmodifiable(
+              rawRanges.whereType<num>().map(
+                (value) => ErikaDynamicRange.fromNativeValue(value.toInt()),
+              ),
+            )
+          : const <ErikaDynamicRange>[],
+      hdrSurfaceSupported: map['hdrSurfaceSupported'] == true,
+      tenBitSurfaceSupported: map['tenBitSurfaceSupported'] == true,
+      hardwareAv1DecodeSupported: map['hardwareAv1DecodeSupported'] == true,
+      hardwareAv1DecodeKnown: map['hardwareAv1DecodeKnown'] == true,
+      nativeVsyncSupported: map['nativeVsyncSupported'] == true,
+      fallbackReason: ErikaOutputFallbackReason.fromNativeValue(
+        (map['fallbackReason'] as num?)?.toInt() ?? -1,
+      ),
+    );
+  }
+
+  final bool known;
+  final List<ErikaDynamicRange> supportedDynamicRanges;
+  final bool hdrSurfaceSupported;
+  final bool tenBitSurfaceSupported;
+  final bool hardwareAv1DecodeSupported;
+  final bool hardwareAv1DecodeKnown;
+  final bool nativeVsyncSupported;
+  final ErikaOutputFallbackReason fallbackReason;
 }
 
 class ErikaPresenterResourceStatus {
@@ -273,9 +377,7 @@ class ErikaPresenterResourceStatus {
       danmakuVertexBufferBytes: value('danmakuVertexBufferBytes'),
       upscalerBytes: value('upscalerBytes'),
       rendererTrackedBytes: value('rendererTrackedBytes'),
-      presenterCpuDanmakuAtlasBytes: value(
-        'presenterCpuDanmakuAtlasBytes',
-      ),
+      presenterCpuDanmakuAtlasBytes: value('presenterCpuDanmakuAtlasBytes'),
       drawableCount: value('drawableCount'),
       outputModeSwitches: value('outputModeSwitches'),
     );
@@ -614,8 +716,9 @@ class _ErikaDanmakuConfigPatch {
     this.blockBottom,
     this.blockScroll,
     List<String>? blockWords,
-  }) : blockWords =
-            blockWords == null ? null : List<String>.unmodifiable(blockWords);
+  }) : blockWords = blockWords == null
+           ? null
+           : List<String>.unmodifiable(blockWords);
 
   final bool? enabled;
   final double? fontSize;
@@ -697,36 +800,39 @@ class _ErikaDanmakuConfigPatch {
       enabled: _changed(enabled, previous?.enabled) ? enabled : null,
       fontSize: _changed(fontSize, previous?.fontSize) ? fontSize : null,
       opacity: _changed(opacity, previous?.opacity) ? opacity : null,
-      displayArea:
-          _changed(displayArea, previous?.displayArea) ? displayArea : null,
+      displayArea: _changed(displayArea, previous?.displayArea)
+          ? displayArea
+          : null,
       scrollDurationSeconds:
           _changed(scrollDurationSeconds, previous?.scrollDurationSeconds)
-              ? scrollDurationSeconds
-              : null,
+          ? scrollDurationSeconds
+          : null,
       scrollSpeedFactor:
           _changed(scrollSpeedFactor, previous?.scrollSpeedFactor)
-              ? scrollSpeedFactor
-              : null,
+          ? scrollSpeedFactor
+          : null,
       trackGapRatio: _changed(trackGapRatio, previous?.trackGapRatio)
           ? trackGapRatio
           : null,
-      outlineWidth:
-          _changed(outlineWidth, previous?.outlineWidth) ? outlineWidth : null,
+      outlineWidth: _changed(outlineWidth, previous?.outlineWidth)
+          ? outlineWidth
+          : null,
       shadowOffsetX: _changed(shadowOffsetX, previous?.shadowOffsetX)
           ? shadowOffsetX
           : null,
       shadowOffsetY: _changed(shadowOffsetY, previous?.shadowOffsetY)
           ? shadowOffsetY
           : null,
-      shadowStyle:
-          _changed(shadowStyle, previous?.shadowStyle) ? shadowStyle : null,
+      shadowStyle: _changed(shadowStyle, previous?.shadowStyle)
+          ? shadowStyle
+          : null,
       customFontFamily: _changed(customFontFamily, previous?.customFontFamily)
           ? customFontFamily
           : null,
       customFontFilePath:
           _changed(customFontFilePath, previous?.customFontFilePath)
-              ? customFontFilePath
-              : null,
+          ? customFontFilePath
+          : null,
       mergeDuplicates: _changed(mergeDuplicates, previous?.mergeDuplicates)
           ? mergeDuplicates
           : null,
@@ -735,20 +841,24 @@ class _ErikaDanmakuConfigPatch {
           : null,
       allowScrollOverwrite:
           _changed(allowScrollOverwrite, previous?.allowScrollOverwrite)
-              ? allowScrollOverwrite
-              : null,
-      maxQuantity:
-          _changed(maxQuantity, previous?.maxQuantity) ? maxQuantity : null,
+          ? allowScrollOverwrite
+          : null,
+      maxQuantity: _changed(maxQuantity, previous?.maxQuantity)
+          ? maxQuantity
+          : null,
       maxLinesPerMode: _changed(maxLinesPerMode, previous?.maxLinesPerMode)
           ? maxLinesPerMode
           : null,
       blockTop: _changed(blockTop, previous?.blockTop) ? blockTop : null,
-      blockBottom:
-          _changed(blockBottom, previous?.blockBottom) ? blockBottom : null,
-      blockScroll:
-          _changed(blockScroll, previous?.blockScroll) ? blockScroll : null,
-      blockWords:
-          _changedList(blockWords, previous?.blockWords) ? blockWords : null,
+      blockBottom: _changed(blockBottom, previous?.blockBottom)
+          ? blockBottom
+          : null,
+      blockScroll: _changed(blockScroll, previous?.blockScroll)
+          ? blockScroll
+          : null,
+      blockWords: _changedList(blockWords, previous?.blockWords)
+          ? blockWords
+          : null,
     );
   }
 
@@ -791,7 +901,7 @@ class _ErikaDanmakuConfigPatch {
 
 class ErikaPlayer {
   ErikaPlayer({
-    this.outputMode,
+    this.outputMode = ErikaOutputMode.auto,
     this.edrHeadroom,
     this.upscaler,
     this.videoAlphaMode = ErikaVideoAlphaMode.opaque,
@@ -1000,7 +1110,8 @@ class ErikaPlayer {
     );
     if (fontId == null) {
       throw StateError(
-          'Erika subtitle memory font registration returned null.');
+        'Erika subtitle memory font registration returned null.',
+      );
     }
     return fontId;
   }
@@ -1009,7 +1120,10 @@ class ErikaPlayer {
     final ids = List<int>.unmodifiable(fontIds);
     if (ids.any((id) => id <= 0) || ids.toSet().length != ids.length) {
       throw ArgumentError.value(
-          fontIds, 'fontIds', 'must contain unique positive IDs');
+        fontIds,
+        'fontIds',
+        'must contain unique positive IDs',
+      );
     }
     final playerId = await ensureCreated();
     await _invoke('selectSubtitleMemoryFonts', <String, Object?>{
@@ -1174,7 +1288,31 @@ class ErikaPlayer {
     if (status == null) {
       throw StateError('Erika output status returned null.');
     }
-    return ErikaOutputStatus.fromMap(status);
+    final parsed = ErikaOutputStatus.fromMap(status);
+    final requestedMode = outputMode;
+    return requestedMode == null
+        ? parsed
+        : parsed.withRequestedMode(requestedMode);
+  }
+
+  Future<ErikaHdrCapabilities> getHdrCapabilities() async {
+    final playerId = await ensureCreated();
+    try {
+      final capabilities = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'getHdrCapabilities',
+        <String, Object?>{'playerId': playerId},
+      );
+      return capabilities == null
+          ? const ErikaHdrCapabilities.unknown()
+          : ErikaHdrCapabilities.fromMap(capabilities);
+    } on MissingPluginException {
+      return const ErikaHdrCapabilities.unknown();
+    } on PlatformException catch (error) {
+      if (error.code == 'unimplemented' || error.code == 'not_implemented') {
+        return const ErikaHdrCapabilities.unknown();
+      }
+      rethrow;
+    }
   }
 
   Future<ErikaPresenterResourceStatus> getResourceStatus() async {
@@ -1263,11 +1401,11 @@ class ErikaPlayer {
     final playerId = await ensureCreated();
     final trackId = await _channel
         .invokeMethod<int>('addDanmakuTrackFile', <String, Object?>{
-      'playerId': playerId,
-      'uri': uri,
-      if (name != null) 'name': name,
-      'offsetMicros': offset.inMicroseconds,
-    });
+          'playerId': playerId,
+          'uri': uri,
+          if (name != null) 'name': name,
+          'offsetMicros': offset.inMicroseconds,
+        });
     if (trackId == null || trackId <= 0) {
       throw StateError('Erika danmaku track add returned no track id.');
     }
@@ -1282,11 +1420,11 @@ class ErikaPlayer {
     final playerId = await ensureCreated();
     final trackId = await _channel
         .invokeMethod<int>('addDanmakuTrackJson', <String, Object?>{
-      'playerId': playerId,
-      'json': json,
-      if (name != null) 'name': name,
-      'offsetMicros': offset.inMicroseconds,
-    });
+          'playerId': playerId,
+          'json': json,
+          if (name != null) 'name': name,
+          'offsetMicros': offset.inMicroseconds,
+        });
     if (trackId == null || trackId <= 0) {
       throw StateError('Erika danmaku track add returned no track id.');
     }
@@ -1552,11 +1690,7 @@ class ErikaPlayer {
   }) async {
     final textureId = await _channel.invokeMethod<int>(
       'createTexture',
-      <String, Object?>{
-        'width': width,
-        'height': height,
-        'scale': scale,
-      },
+      <String, Object?>{'width': width, 'height': height, 'scale': scale},
     );
     if (textureId == null || textureId < 0) {
       throw StateError('Erika texture allocation failed.');
@@ -1579,9 +1713,7 @@ class ErikaPlayer {
   }
 
   Future<void> releaseTextureSurface(int textureId) {
-    return _invoke('releaseTexture', <String, Object?>{
-      'textureId': textureId,
-    });
+    return _invoke('releaseTexture', <String, Object?>{'textureId': textureId});
   }
 
   /// Attaches the shared native overlay to this player.
@@ -1595,16 +1727,14 @@ class ErikaPlayer {
     double opacity = 1.0,
   }) async {
     final playerId = await ensureCreated();
-    final viewId = await _channel.invokeMethod<int>(
-      'attachOverlay',
-      <String, Object?>{
-        'playerId': playerId,
-        if (flutterViewId != null) 'flutterViewId': flutterViewId,
-        'secondaryWindow': secondaryWindow,
-        if (blendMode != 'srcOver') 'blendMode': blendMode,
-        if (opacity != 1.0) 'opacity': opacity,
-      },
-    );
+    final viewId = await _channel
+        .invokeMethod<int>('attachOverlay', <String, Object?>{
+          'playerId': playerId,
+          if (flutterViewId != null) 'flutterViewId': flutterViewId,
+          'secondaryWindow': secondaryWindow,
+          if (blendMode != 'srcOver') 'blendMode': blendMode,
+          if (opacity != 1.0) 'opacity': opacity,
+        });
     return viewId ?? windowOverlayViewId;
   }
 
@@ -1692,10 +1822,15 @@ class ErikaPlayer {
   }
 
   Future<int> _create() async {
-    final requestedHeadroom = edrHeadroom ??
-        (outputMode == ErikaOutputMode.extendedLinear ? 4.0 : null);
+    final requestedHeadroom =
+        edrHeadroom ??
+        (outputMode == ErikaOutputMode.preferHdr ||
+                outputMode == ErikaOutputMode.extendedLinear
+            ? 4.0
+            : null);
     final arguments = <String, Object?>{
-      if (outputMode case final mode?) 'outputMode': mode.nativeValue,
+      if (outputMode case final mode?)
+        'outputMode': _nativeOutputModeValue(mode),
       if (requestedHeadroom case final headroom?) 'edrHeadroom': headroom,
       if (upscaler case final mode?) 'upscaler': mode.nativeValue,
       if (videoAlphaMode != ErikaVideoAlphaMode.opaque)
@@ -1713,6 +1848,18 @@ class ErikaPlayer {
     _id = playerId;
     _controllerFor(playerId);
     return playerId;
+  }
+
+  static int _nativeOutputModeValue(ErikaOutputMode mode) {
+    if (mode != ErikaOutputMode.preferHdr) {
+      return mode.nativeValue;
+    }
+    return switch (defaultTargetPlatform.name) {
+      'ohos' => ErikaOutputMode.preferHdr.nativeValue,
+      'android' => ErikaOutputMode.extendedLinear.nativeValue,
+      'iOS' || 'macOS' => ErikaOutputMode.appleEdr.nativeValue,
+      _ => ErikaOutputMode.auto.nativeValue,
+    };
   }
 
   Future<int> _requireActiveAfter(Future<int> player) async {

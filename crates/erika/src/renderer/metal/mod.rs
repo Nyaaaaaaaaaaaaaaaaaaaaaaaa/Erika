@@ -17,7 +17,8 @@ use crate::trace;
 
 pub use crate::renderer::output::OutputMode as MetalOutputMode;
 use crate::renderer::output::{
-    ActiveOutputEncoding, OutputFallbackReason, OutputRuntimeStatus, OutputSurfaceFormat,
+    ActiveOutputEncoding, DynamicRange, OutputFallbackReason, OutputRuntimeStatus,
+    OutputSurfaceFormat,
 };
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
@@ -1073,6 +1074,13 @@ impl RendererBackend for MetalRenderer {
             data_space_failures: 0,
             headroom_updates: 0,
             extended_linear_frames: stats.edr_rendered_frames,
+            source_dynamic_range: DynamicRange::Unknown,
+            active_dynamic_range: if extended {
+                DynamicRange::Unknown
+            } else {
+                DynamicRange::Sdr
+            },
+            hdr_output_confirmed: extended && stats.edr_rendered_frames > 0,
         }
     }
 

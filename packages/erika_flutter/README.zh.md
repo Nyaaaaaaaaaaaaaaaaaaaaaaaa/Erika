@@ -39,7 +39,7 @@ cargo build -p erika_capi
 
 ## 预构建包与源码构建
 
-插件默认从 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 下载与当前版本对应的 `v0.1.8` 原生库，并校验 SHA-256；可用 `ERIKA_PREBUILT_REPOSITORY=owner/repo` 覆盖。组织发布对应资产前下载会明确失败，不会静默回退源码构建或上游全格式二进制。只有在 Erika checkout 中调试源码时才设置 `ERIKA_FORCE_SOURCE_BUILD=1`。自定义 `ERIKA_PREBUILT_TAG` 时，单 ABI 构建须提供对应的 `ERIKA_PREBUILT_SHA256`；Android 多 ABI 构建则须分别提供 `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64` 和 `ERIKA_PREBUILT_SHA256_X86`。完整发布方式见 [发布指南](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/releasing.zh.md)。
+插件默认从 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 下载与当前版本对应的 `v0.2.0` 原生库，并校验 SHA-256；可用 `ERIKA_PREBUILT_REPOSITORY=owner/repo` 覆盖。资产缺失或校验失败时会明确报错，不会静默回退源码构建或上游全格式二进制；本地源码验收请设置 `ERIKA_FORCE_SOURCE_BUILD=1`。自定义 `ERIKA_PREBUILT_TAG` 时，单 ABI 构建须提供对应的 `ERIKA_PREBUILT_SHA256`；Android 多 ABI 构建则须分别提供 `ERIKA_PREBUILT_SHA256_ARM64_V8A`、`ERIKA_PREBUILT_SHA256_ARMEABI_V7A`、`ERIKA_PREBUILT_SHA256_X86_64` 和 `ERIKA_PREBUILT_SHA256_X86`。完整发布方式见 [发布指南](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/releasing.zh.md)。
 Android 会为每个实际请求的 ABI 只下载一个约 20–22MB 的 runtime 归档，不会获取四 ABI 合并 C API 包或其中的静态库。
 
 源码构建时，macOS 使用 `ERIKA_MACOS_ARCHS=arm64|x86_64|universal`，Windows 使用 `ERIKA_WINDOWS_ARCH=x64|arm64`，Android 使用 `ERIKA_ANDROID_ABIS=arm64-v8a,armeabi-v7a,x86_64,x86`。直接构建原生库时，`xtask --target`、`ERIKA_NATIVE_TARGET` 和 `cargo build --target` 必须使用同一个 target。详细示例见 [构建指南](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/main/docs/building.zh.md)。
@@ -190,20 +190,24 @@ Android 最低版本仍为 API 26。Extended-linear 还要求 native-window data
 
 ## HarmonyOS Setup
 
-HarmonyOS 模块需要 DevEco Studio 的 OpenHarmony Native SDK。CMake 默认下载并校验
+HarmonyOS NEXT 模块需要 DevEco Studio HarmonyOS 6 / API 20 SDK，最低兼容
+HarmonyOS NEXT 5.1 / API 18。CMake 默认下载并校验
 `liberika_capi.so`，再与 `liberika_flutter.so` 一起打包。只有显式设置
 `ERIKA_FORCE_SOURCE_BUILD=1` 时才需要 Rust 的 `aarch64-unknown-linux-ohos` target。
 
 HarmonyOS 使用 AVSession 发布媒体元数据、封面、播放状态、进度和倍速，并接收系统播放、暂停、停止及进度调整命令。
 
-HarmonyOS 上请使用 `ErikaVideoView`。它注册 Flutter 外部纹理，把纹理 surface 取为
-`OHNativeWindow`，并通过 wgpu Vulkan 渲染。音频走 OHAudio，交错 f32 PCM。
+HarmonyOS NEXT 上请使用 `ErikaVideoView`。它把 XComponent/Flutter surface 取为
+`OHNativeWindow`；prefer-HDR 会先验证 RGBA_1010102、BT.2020 PQ、HDR10 元数据与白点，
+再通过 wgpu Vulkan 渲染，失败则显式回退 RGBA8888/sRGB。DisplaySoloist 负责 VSync，
+不再用 `setInterval` 驱动画面。音频走 OHAudio，交错 f32 PCM。
 
 此 AV1/AVIF 专用 fork 在 HarmonyOS 上只查询硬件类别的 `video/av1` AVCodec
 capability，校验编码尺寸后用返回的 codec name 创建 decoder；不会选择系统推荐的
 软件 AVCodec。无硬件能力、尺寸不支持或打开/运行失败时直接回退 dav1d。Surface
 输出走 NativeBuffer/Vulkan，AVCodec buffer 输出与 dav1d 走 CPU upload；静态 AVIF
-遵循同一策略。
+只解码一次并保留最后帧，静态 HEIF 走 HEVC fallback。Ultra HDR JPEG 当前可靠显示
+SDR base image；gain-map 重建未完成前不会误报 `hdrOutputConfirmed`。
 
 ## HTTP 请求头
 

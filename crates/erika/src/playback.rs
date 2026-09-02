@@ -29,14 +29,16 @@ pub enum PlaybackError {
     Ffmpeg(#[from] ffmpeg::FfmpegError),
     #[error("source error: {0}")]
     Source(#[from] source::SourceError),
-    #[error("no supported visual track found; only AV1 video and static AVIF images are supported")]
+    #[error(
+        "no supported visual track found; AV1 video and static AVIF/HEIF/JPEG images are supported"
+    )]
     NoVideoTrack,
     #[error(
-        "unsupported visual codec {codec}; only AV1 video and static AVIF images are supported"
+        "unsupported visual codec {codec}; AV1 video and static AVIF/HEIF/JPEG images are supported"
     )]
     UnsupportedVisualCodec { codec: String },
     #[error(
-        "unable to inspect this media ({reason}); only AV1 video and static AVIF images are supported"
+        "unable to inspect this media ({reason}); AV1 video and static AVIF/HEIF/JPEG images are supported"
     )]
     UnsupportedMediaInput { reason: String },
     #[error("video decoder unavailable: {reason}")]
@@ -869,7 +871,7 @@ impl PlaybackSession {
         probe.subtitles.clear();
         probe.subtitle_fonts = Arc::from([]);
         let subtitle_fonts: Arc<[SubtitleFontAttachment]> = Arc::from([]);
-        let selected_video_track = Some(supported_visual_track(&probe.tracks)?);
+        let selected_video_track = Some(supported_visual_track(&probe.tracks, probe.duration)?);
         let codec_parameters = probe
             .tracks
             .iter()
@@ -5866,11 +5868,18 @@ fn sanitize_playback_rate(rate: f64) -> f64 {
     }
 }
 
-fn supported_visual_track(tracks: &[TrackInfo]) -> Result<i32> {
+fn supported_visual_track(tracks: &[TrackInfo], duration: Option<Duration>) -> Result<i32> {
     let mut selected = None;
+    // Still-image demuxers commonly expose no duration. A bounded duration and
+    // no audio track covers HEIF/JPEG containers that report a nominal tick,
+    // while keeping general HEVC/MJPEG video outside Erika's AV1-only policy.
+    let static_image_candidate = !tracks.iter().any(|track| track.kind == TrackKind::Audio)
+        && duration.is_none_or(|duration| duration <= Duration::from_secs(1));
     for track in tracks.iter().filter(|track| track.kind == TrackKind::Video) {
         let codec = track.codec.as_deref().unwrap_or("unknown");
-        if !codec.eq_ignore_ascii_case("av1") {
+        let supported_static_codec = static_image_candidate
+            && (codec.eq_ignore_ascii_case("hevc") || codec.eq_ignore_ascii_case("mjpeg"));
+        if !codec.eq_ignore_ascii_case("av1") && !supported_static_codec {
             return Err(PlaybackError::UnsupportedVisualCodec {
                 codec: codec.to_string(),
             });
@@ -5991,7 +6000,10 @@ mod tests {
             track(1, TrackKind::Audio, Some("flac")),
             track(2, TrackKind::Subtitle, Some("subrip")),
         ];
-        assert_eq!(supported_visual_track(&tracks).unwrap(), 0);
+        assert_eq!(
+            supported_visual_track(&tracks, Some(Duration::from_secs(8))).unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -6005,8 +6017,11 @@ mod tests {
             Some("webp"),
             None,
         ] {
-            let error = supported_visual_track(&[track(0, TrackKind::Video, codec)])
-                .expect_err("non-AV1 visual tracks must be rejected");
+            let error = supported_visual_track(
+                &[track(0, TrackKind::Video, codec)],
+                Some(Duration::from_secs(8)),
+            )
+            .expect_err("non-AV1 visual tracks must be rejected");
             assert!(matches!(
                 error,
                 PlaybackError::UnsupportedVisualCodec { .. }
@@ -6014,20 +6029,23 @@ mod tests {
             assert!(
                 error
                     .to_string()
-                    .contains("only AV1 video and static AVIF images")
+                    .contains("AV1 video and static AVIF/HEIF/JPEG images")
             );
         }
     }
 
     #[test]
     fn visual_policy_rejects_audio_only_media() {
-        let error = supported_visual_track(&[track(0, TrackKind::Audio, Some("flac"))])
-            .expect_err("audio-only media must be rejected");
+        let error = supported_visual_track(
+            &[track(0, TrackKind::Audio, Some("flac"))],
+            Some(Duration::from_secs(8)),
+        )
+        .expect_err("audio-only media must be rejected");
         assert!(matches!(error, PlaybackError::NoVideoTrack));
         assert!(
             error
                 .to_string()
-                .contains("only AV1 video and static AVIF images")
+                .contains("AV1 video and static AVIF/HEIF/JPEG images")
         );
     }
 
@@ -6147,7 +6165,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("only AV1 video and static AVIF images")
+                .contains("AV1 video and static AVIF/HEIF/JPEG images")
         );
     }
 
@@ -6189,7 +6207,7 @@ mod tests {
             assert!(
                 error
                     .to_string()
-                    .contains("only AV1 video and static AVIF images"),
+                    .contains("AV1 video and static AVIF/HEIF/JPEG images"),
                 "unexpected error for {}: {error}",
                 path.display()
             );

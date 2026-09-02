@@ -702,6 +702,9 @@ pub struct SurfaceOutputCapabilities {
     /// Host-side reason why extended-linear eligibility is unavailable. This
     /// keeps display/API failures queryable after the renderer falls back.
     pub fallback_reason: crate::renderer::output::OutputFallbackReason,
+    /// Platform-defined color-space value read back from the native window.
+    /// A negative value means the host could not verify it.
+    pub native_data_space: i32,
 }
 
 impl Default for SurfaceOutputCapabilities {
@@ -711,6 +714,7 @@ impl Default for SurfaceOutputCapabilities {
             direct_composition: false,
             desired_headroom: 0.0,
             fallback_reason: crate::renderer::output::OutputFallbackReason::None,
+            native_data_space: -1,
         }
     }
 }

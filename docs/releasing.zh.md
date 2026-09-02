@@ -2,10 +2,9 @@
 
 > 翻译：[English](releasing.md) · [日本語](releasing.ja.md)
 
-> fork 策略：`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 尚未发布原生、pub.dev、OHPM 或
-> Swift 工件。生态发布 workflow 被限制为仅在 `AimesSoft/Erika` 执行；此 fork 将来可以
-> 使用原生 GitHub Release workflow 发布组织内资产，但不得向上游包渠道或
-> `AimesSoft/ErikaSwift` 写入。
+> fork 策略：`Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 只通过自身 GitHub Release 发布
+> 组织内原生资产。生态发布 workflow 被限制为仅在 `AimesSoft/Erika` 执行；此 fork
+> 不得向 pub.dev、OHPM、上游包渠道或 `AimesSoft/ErikaSwift` 写入。
 
 预编译下载默认使用 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika`，可通过
 `ERIKA_PREBUILT_REPOSITORY=owner/repo` 覆盖。fork 资产缺失时必须明确失败，禁止回退到
@@ -64,7 +63,7 @@ pub.dev、OHPM 和 ErikaSwift 由
 Flutter/OHPM package 的版本与 SHA-256，再分别执行发布。正常发版只需要推送一个核心 tag：
 
 ```sh
-VERSION=0.1.8
+VERSION=0.2.0
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
@@ -92,7 +91,7 @@ git push origin "v${VERSION}"
 Release 由 [release.yml](../.github/workflows/release.yml) 自动执行。推送 `v*` tag 才会创建 GitHub Release：
 
 ```sh
-VERSION=0.1.8
+VERSION=0.2.0
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```

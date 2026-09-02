@@ -139,6 +139,14 @@ typedef enum ErikaPresenterOutputMode {
   ErikaPresenterOutputMode_Auto = 3,
 } ErikaPresenterOutputMode;
 
+typedef enum ErikaDynamicRange {
+  ErikaDynamicRange_Unknown = 0,
+  ErikaDynamicRange_Sdr = 1,
+  ErikaDynamicRange_Hdr10Pq = 2,
+  ErikaDynamicRange_Hlg = 3,
+  ErikaDynamicRange_UltraHdrGainMap = 4,
+} ErikaDynamicRange;
+
 typedef enum ErikaActiveOutputEncoding {
   ErikaActiveOutputEncoding_SdrSrgb = 0,
   ErikaActiveOutputEncoding_AppleEdr = 1,
@@ -156,6 +164,10 @@ typedef enum ErikaOutputFallbackReason {
   ErikaOutputFallbackReason_ScrgbDataSpaceVerificationFailed = 6,
   ErikaOutputFallbackReason_SurfaceConfigureFailed = 7,
   ErikaOutputFallbackReason_LegacyAppleEdrUnsupported = 8,
+  ErikaOutputFallbackReason_TenBitSurfaceFormatUnavailable = 9,
+  ErikaOutputFallbackReason_HdrWindowConfigurationFailed = 10,
+  ErikaOutputFallbackReason_HdrMetadataVerificationFailed = 11,
+  ErikaOutputFallbackReason_NativeVsyncUnavailable = 12,
 } ErikaOutputFallbackReason;
 
 typedef enum ErikaOutputSurfaceFormat {
@@ -235,6 +247,7 @@ typedef struct ErikaSurfaceOutputCapabilities {
   bool direct_composition;
   float desired_headroom;
   int32_t fallback_reason;
+  int32_t native_data_space;
 } ErikaSurfaceOutputCapabilities;
 
 typedef struct ErikaUpscalerStatus {
@@ -261,6 +274,14 @@ typedef struct ErikaOutputStatus {
   uint64_t headroom_updates;
   uint64_t extended_linear_frames;
 } ErikaOutputStatus;
+
+/* Additive 0.2 extension. Kept separate so ErikaOutputStatus remains ABI
+ * compatible with 0.1 embedders. */
+typedef struct ErikaDynamicRangeStatus {
+  int32_t source_dynamic_range;
+  int32_t active_dynamic_range;
+  bool hdr_output_confirmed;
+} ErikaDynamicRangeStatus;
 
 /* Renderer memory snapshot. Per-resource fields are allocations tracked by
  * one presenter. device_current_allocated_bytes is Metal's device-wide
@@ -598,6 +619,9 @@ ErikaStatus erika_presenter_get_upscaler_status(
 ErikaStatus erika_presenter_get_output_status(
     ErikaPresenterHandle *handle,
     ErikaOutputStatus *out_status);
+ErikaStatus erika_presenter_get_dynamic_range_status(
+    ErikaPresenterHandle *handle,
+    ErikaDynamicRangeStatus *out_status);
 ErikaStatus erika_presenter_get_resource_status(
     ErikaPresenterHandle *handle,
     ErikaPresenterResourceStatus *out_status);

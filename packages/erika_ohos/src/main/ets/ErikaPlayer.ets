@@ -14,8 +14,52 @@ export interface ErikaSurfaceOptions {
   scale?: number;
 }
 
+export enum ErikaOutputMode {
+  Sdr = 0,
+  Auto = 3,
+  PreferHdr = 4,
+}
+
+export enum ErikaDynamicRange {
+  Unknown = 0,
+  Sdr = 1,
+  Hdr10Pq = 2,
+  Hlg = 3,
+  UltraHdrGainMap = 4,
+}
+
+export interface ErikaOutputStatus {
+  requestedMode: number;
+  activeEncoding: number;
+  surfaceFormat: number;
+  nativeDataSpace: number;
+  requestedHeadroom: number;
+  activeHeadroom: number;
+  activeHeadroomKnown: boolean;
+  extendedLinearActive: boolean;
+  fallbackReason: number;
+  fallbackCount: number;
+  dataSpaceFailures: number;
+  headroomUpdates: number;
+  extendedLinearFrames: number;
+  sourceDynamicRange: ErikaDynamicRange;
+  activeDynamicRange: ErikaDynamicRange;
+  hdrOutputConfirmed: boolean;
+}
+
+export interface ErikaHdrCapabilities {
+  known: boolean;
+  supportedDynamicRanges: Array<ErikaDynamicRange>;
+  hdrSurfaceSupported: boolean;
+  tenBitSurfaceSupported: boolean;
+  hardwareAv1DecodeSupported: boolean;
+  hardwareAv1DecodeKnown: boolean;
+  nativeVsyncSupported: boolean;
+  fallbackReason: number;
+}
+
 export interface ErikaPlayerConfig {
-  outputMode?: number;
+  outputMode?: ErikaOutputMode;
   edrHeadroom?: number;
   upscaler?: number;
 }
@@ -29,17 +73,25 @@ export interface ErikaOpenOptions {
  * Native ArkTS wrapper around ErikaPresenterHandle.
  *
  * This package does not depend on Flutter. Hosts provide an XComponent surface
- * id to attachSurface(), then drive renderTick() from their frame scheduler.
+ * id to attachSurface(). Native DisplaySoloist drives rendering from display
+ * VSync; renderTick() remains only as a compatibility/debug hook.
  */
 export class ErikaPlayer {
   private readonly nativeId: number;
+  private readonly outputMode: ErikaOutputMode;
   private disposed: boolean = false;
+  private lastOutputStatus: string = '';
 
   constructor(config: ErikaPlayerConfig = {}) {
-    const outputMode: number = config.outputMode ?? 0;
+    const requestedMode: ErikaOutputMode = config.outputMode ?? ErikaOutputMode.Auto;
+    this.outputMode = requestedMode === ErikaOutputMode.Sdr
+      ? ErikaOutputMode.Sdr
+      : requestedMode === ErikaOutputMode.Auto
+        ? ErikaOutputMode.Auto
+        : ErikaOutputMode.PreferHdr;
     const edrHeadroom: number = config.edrHeadroom ?? 1.0;
     const upscaler: number = config.upscaler ?? 0;
-    this.nativeId = erikaNative.nativeCreate(outputMode, edrHeadroom, upscaler) as number;
+    this.nativeId = erikaNative.nativeCreate(this.outputMode, edrHeadroom, upscaler) as number;
     if (this.nativeId <= 0) {
       throw new Error('Erika player creation failed: ' + (erikaNative.nativeLastError() as string));
     }
@@ -122,6 +174,18 @@ export class ErikaPlayer {
     return JSON.parse(raw) as ErikaNativeResponse;
   }
 
+  getOutputStatus(): ErikaOutputStatus {
+    const status: ErikaOutputStatus = this.invokeOrThrow('getOutputStatus') as ErikaOutputStatus;
+    status.requestedMode = this.outputMode;
+    return status;
+  }
+
+  getHdrCapabilities(): ErikaHdrCapabilities {
+    this.ensureAlive();
+    const raw: string = erikaNative.nativeGetHdrCapabilitiesJson(this.nativeId) as string;
+    return JSON.parse(raw) as ErikaHdrCapabilities;
+  }
+
   audioOnlyTick(): void {
     this.ensureAlive();
     const status: number = erikaNative.nativeAudioOnlyTick(this.nativeId) as number;
@@ -132,7 +196,17 @@ export class ErikaPlayer {
     this.ensureAlive();
     const raw: ESObject = erikaNative.nativePollEvent(this.nativeId);
     if (raw === null || raw === undefined) {
-      return null;
+      const outputStatus: ErikaOutputStatus = this.getOutputStatus();
+      const serialized: string = JSON.stringify(outputStatus);
+      if (serialized === this.lastOutputStatus) {
+        return null;
+      }
+      this.lastOutputStatus = serialized;
+      return {
+        playerId: this.nativeId,
+        kind: 14,
+        outputStatus: outputStatus,
+      };
     }
     return JSON.parse(raw as string) as ESObject;
   }

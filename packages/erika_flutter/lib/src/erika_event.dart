@@ -1,3 +1,5 @@
+import 'erika_player.dart';
+
 enum ErikaPlaybackState {
   idle,
   opening,
@@ -24,23 +26,36 @@ enum ErikaEventKind {
   videoDecoderChanged,
   audioOutputChanged,
   systemMediaNavigationRequested,
+  outputStatusChanged,
 }
 
-enum ErikaSystemMediaCommand {
-  previous,
-  next,
+/// Stable resource/output dynamic-range values shared with Cloud and App.
+enum ErikaDynamicRange {
+  unknown(0, 'unknown'),
+  sdr(1, 'sdr'),
+  hdr10Pq(2, 'hdr10_pq'),
+  hlg(3, 'hlg'),
+  ultraHdrGainMap(4, 'ultra_hdr_gain_map');
+
+  const ErikaDynamicRange(this.nativeValue, this.wireValue);
+
+  final int nativeValue;
+  final String wireValue;
+
+  static ErikaDynamicRange fromNativeValue(int value) => switch (value) {
+    1 => ErikaDynamicRange.sdr,
+    2 => ErikaDynamicRange.hdr10Pq,
+    3 => ErikaDynamicRange.hlg,
+    4 => ErikaDynamicRange.ultraHdrGainMap,
+    _ => ErikaDynamicRange.unknown,
+  };
 }
 
-enum ErikaTrackKind {
-  video,
-  audio,
-  subtitle,
-}
+enum ErikaSystemMediaCommand { previous, next }
 
-enum ErikaTrackSource {
-  embedded,
-  external,
-}
+enum ErikaTrackKind { video, audio, subtitle }
+
+enum ErikaTrackSource { embedded, external }
 
 class ErikaVideoParams {
   const ErikaVideoParams({
@@ -98,10 +113,11 @@ class ErikaVideoDecoderInfo {
       codec: map['codec'] as String?,
       pixelFormat: map['pixelFormat'] as String?,
       lineSizes: switch (map['lineSizes']) {
-        final List<dynamic> values => values
-            .whereType<num>()
-            .map((value) => value.toInt())
-            .toList(growable: false),
+        final List<dynamic> values =>
+          values
+              .whereType<num>()
+              .map((value) => value.toInt())
+              .toList(growable: false),
         _ => const <int>[],
       },
       reason: map['reason'] as String?,
@@ -198,11 +214,7 @@ class ErikaTrackCounts {
 }
 
 class ErikaTrackSelection {
-  const ErikaTrackSelection({
-    this.video,
-    this.audio,
-    this.subtitle,
-  });
+  const ErikaTrackSelection({this.video, this.audio, this.subtitle});
 
   factory ErikaTrackSelection.fromMap(Map<dynamic, dynamic>? map) {
     return ErikaTrackSelection(
@@ -381,6 +393,7 @@ class ErikaPlayerEvent {
     this.decoder,
     this.audio,
     this.systemMediaCommand,
+    this.outputStatus,
   });
 
   factory ErikaPlayerEvent.fromMap(Map<dynamic, dynamic> map) {
@@ -392,9 +405,7 @@ class ErikaPlayerEvent {
       position: Duration(microseconds: _asInt(map['positionMicros'])),
       buffering: map['buffering'] == true,
       video: ErikaVideoParams.fromMap(map['video'] as Map<dynamic, dynamic>?),
-      tracks: ErikaTrackCounts.fromMap(
-        map['tracks'] as Map<dynamic, dynamic>?,
-      ),
+      tracks: ErikaTrackCounts.fromMap(map['tracks'] as Map<dynamic, dynamic>?),
       trackList: _trackListFromValue(map['trackList']),
       trackSelection: ErikaTrackSelection.fromMap(
         map['trackSelection'] as Map<dynamic, dynamic>?,
@@ -403,18 +414,24 @@ class ErikaPlayerEvent {
       error: map['error'] as String?,
       message: map['message'] as String?,
       decoder: switch (map['decoder']) {
-        final Map<dynamic, dynamic> value =>
-          ErikaVideoDecoderInfo.fromMap(value),
+        final Map<dynamic, dynamic> value => ErikaVideoDecoderInfo.fromMap(
+          value,
+        ),
         _ => null,
       },
       audio: switch (map['audio']) {
-        final Map<dynamic, dynamic> value =>
-          ErikaAudioOutputInfo.fromMap(value),
+        final Map<dynamic, dynamic> value => ErikaAudioOutputInfo.fromMap(
+          value,
+        ),
         _ => null,
       },
       systemMediaCommand: switch (map['navigation']) {
         'previous' => ErikaSystemMediaCommand.previous,
         'next' => ErikaSystemMediaCommand.next,
+        _ => null,
+      },
+      outputStatus: switch (map['outputStatus']) {
+        final Map<dynamic, dynamic> value => ErikaOutputStatus.fromMap(value),
         _ => null,
       },
     );
@@ -436,6 +453,9 @@ class ErikaPlayerEvent {
   final ErikaVideoDecoderInfo? decoder;
   final ErikaAudioOutputInfo? audio;
   final ErikaSystemMediaCommand? systemMediaCommand;
+
+  /// Complete, de-duplicated output snapshot for `outputStatusChanged`.
+  final ErikaOutputStatus? outputStatus;
 
   static int _asInt(Object? value) {
     if (value is int) {

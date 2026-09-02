@@ -165,23 +165,28 @@ set(OHOS_LIBCLANG_PATH "${OHOS_SDK_NATIVE}/llvm/lib")
 set(OHOS_CARGO_EXTRA_ENV)
 if(CMAKE_HOST_WIN32)
   # The Windows SDK's target-prefixed drivers are POSIX shell scripts. Cargo
-  # and cc-rs launch their tools directly, so select the native executables
-  # and reproduce the wrapper flags explicitly.
+  # and cc-rs launch their tools directly. Generate no-space local wrappers
+  # that inject the target/sysroot as already-tokenized arguments; raw CFLAGS
+  # split an SDK path such as "Program Files" inside cc-rs.
   set(OHOS_CLANG_TARGET aarch64-linux-ohos)
-  set(OHOS_CARGO_LINKER "${OHOS_LLVM_BIN}/clang.exe")
-  set(OHOS_CARGO_CC "${OHOS_LLVM_BIN}/clang.exe")
-  set(OHOS_CARGO_CXX "${OHOS_LLVM_BIN}/clang++.exe")
+  set(OHOS_CARGO_SHIM_DIR "${CMAKE_CURRENT_BINARY_DIR}/ohos-tool-shims")
+  file(MAKE_DIRECTORY "${OHOS_CARGO_SHIM_DIR}")
+  file(TO_NATIVE_PATH "${OHOS_LLVM_BIN}/clang.exe" OHOS_CLANG_NATIVE)
+  file(TO_NATIVE_PATH "${OHOS_LLVM_BIN}/clang++.exe" OHOS_CLANGXX_NATIVE)
+  file(TO_NATIVE_PATH "${OHOS_SDK_NATIVE}/sysroot" OHOS_SYSROOT_NATIVE)
+  set(OHOS_CARGO_LINKER "${OHOS_CARGO_SHIM_DIR}/clang.cmd")
+  set(OHOS_CARGO_CC "${OHOS_CARGO_SHIM_DIR}/clang.cmd")
+  set(OHOS_CARGO_CXX "${OHOS_CARGO_SHIM_DIR}/clangxx.cmd")
+  file(WRITE "${OHOS_CARGO_CC}"
+    "@echo off\r\n\"${OHOS_CLANG_NATIVE}\" -target ${OHOS_CLANG_TARGET} --sysroot=\"${OHOS_SYSROOT_NATIVE}\" -D__MUSL__ %*\r\n")
+  file(WRITE "${OHOS_CARGO_CXX}"
+    "@echo off\r\n\"${OHOS_CLANGXX_NATIVE}\" -target ${OHOS_CLANG_TARGET} --sysroot=\"${OHOS_SYSROOT_NATIVE}\" -D__MUSL__ %*\r\n")
   set(OHOS_CARGO_AR "${OHOS_LLVM_BIN}/llvm-ar.exe")
   set(OHOS_LIBCLANG_PATH "${OHOS_LLVM_BIN}")
   set(OHOS_BINDGEN_ARGS
-    "--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -isystem ${OHOS_CXX_INCLUDE}"
+    "-target ${OHOS_CLANG_TARGET} --sysroot=\"${OHOS_SDK_NATIVE}/sysroot\" -isystem \"${OHOS_CXX_INCLUDE}\""
   )
-  list(APPEND OHOS_CARGO_EXTRA_ENV
-    "BINDGEN_EXTRA_CLANG_ARGS=${OHOS_BINDGEN_ARGS}"
-    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS=-C link-arg=--target=${OHOS_CLANG_TARGET} -C link-arg=--sysroot=${OHOS_SDK_NATIVE}/sysroot"
-    "CFLAGS_aarch64_unknown_linux_ohos=--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -D__MUSL__ -fPIC"
-    "CXXFLAGS_aarch64_unknown_linux_ohos=--target=${OHOS_CLANG_TARGET} --sysroot=${OHOS_SDK_NATIVE}/sysroot -D__MUSL__ -fPIC"
-  )
+  list(APPEND OHOS_CARGO_EXTRA_ENV "BINDGEN_EXTRA_CLANG_ARGS=${OHOS_BINDGEN_ARGS}")
 endif()
 if(NOT ERIKA_USE_PREBUILT)
   find_program(CARGO_EXECUTABLE cargo REQUIRED)
@@ -231,7 +236,13 @@ if(NOT ERIKA_USE_PREBUILT)
   add_dependencies(erika_capi erika_ohos_runtime)
 endif()
 
-add_library(${PLUGIN_NAME} SHARED erika_flutter_plugin.cpp)
+set(ERIKA_HARMONY_NEXT_NATIVE
+  "${CMAKE_CURRENT_SOURCE_DIR}/harmony_next"
+)
+add_library(${PLUGIN_NAME} SHARED
+  erika_flutter_plugin.cpp
+  "${ERIKA_HARMONY_NEXT_NATIVE}/erika_harmony_next_surface.cpp"
+)
 if(NOT ERIKA_USE_PREBUILT)
   add_dependencies(${PLUGIN_NAME} erika_ohos_runtime)
 endif()
@@ -242,6 +253,7 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES
 target_include_directories(${PLUGIN_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${ERIKA_PACKAGE_ROOT}/native/include"
+  "${ERIKA_HARMONY_NEXT_NATIVE}"
 )
 target_compile_options(${PLUGIN_NAME} PRIVATE
   -fno-exceptions
@@ -253,6 +265,8 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
   erika_capi
   libace_napi.z.so
   libnative_window.so
+  libnative_display_soloist.so
+  libnative_media_codecbase.so
   libhilog_ndk.z.so
 )
 add_custom_command(

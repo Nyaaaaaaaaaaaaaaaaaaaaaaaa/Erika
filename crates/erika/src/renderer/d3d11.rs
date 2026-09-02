@@ -52,7 +52,8 @@ use crate::overlay::OverlayFrame;
 use crate::renderer::d3d11_artcnn::D3d11ArtCnn;
 use crate::renderer::metal::{MetalRendererConfig, VideoAlphaMode};
 use crate::renderer::output::{
-    ActiveOutputEncoding, OutputFallbackReason, OutputRuntimeStatus, OutputSurfaceFormat,
+    ActiveOutputEncoding, DynamicRange, OutputFallbackReason, OutputRuntimeStatus,
+    OutputSurfaceFormat,
 };
 use crate::renderer::pipeline::{
     Chromaticity, LumaUpscalerMode, PrimariesCoordinates, SourceColorState, TargetColorState,
@@ -1768,6 +1769,13 @@ impl RendererBackend for D3d11Renderer {
             data_space_failures: self.stats.hdr10_output_failures,
             headroom_updates: self.stats.hdr10_metadata_updates,
             extended_linear_frames: 0,
+            source_dynamic_range: DynamicRange::Unknown,
+            active_dynamic_range: if hdr10_active {
+                DynamicRange::Hdr10Pq
+            } else {
+                DynamicRange::Sdr
+            },
+            hdr_output_confirmed: hdr10_active && self.stats.hdr10_output_frames > 0,
         }
     }
 

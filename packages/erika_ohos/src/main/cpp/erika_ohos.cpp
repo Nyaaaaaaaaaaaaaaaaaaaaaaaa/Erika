@@ -6,16 +6,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <string>
 #include <unordered_map>
 
 #include "erika.h"
+#include "erika_harmony_next_surface.h"
 
 namespace {
 
 struct OhosPlayer {
   ErikaPresenterHandle* presenter = nullptr;
   OHNativeWindow* window = nullptr;
+  bool hdr_requested = false;
+  ErikaHarmonyNextSurfaceState surface_state;
+  ErikaHarmonyNextFrameDriver* frame_driver = nullptr;
 };
 
 std::unordered_map<int64_t, OhosPlayer> g_players;
@@ -90,6 +95,9 @@ OhosPlayer* FindPlayer(int64_t player_id) {
 }
 
 void ReleaseWindow(OhosPlayer& player) {
+  if (player.frame_driver != nullptr) {
+    player.frame_driver->Stop();
+  }
   if (player.presenter != nullptr && player.window != nullptr) {
     erika_presenter_detach_surface(player.presenter);
   }
@@ -107,7 +115,8 @@ napi_value NativeCreate(napi_env env, napi_callback_info info) {
     return Int64(env, 0);
   }
   ErikaPresenterConfig config = {};
-  config.output_mode = GetInt32(env, args[0]);
+  const int32_t requested_output_mode = GetInt32(env, args[0]);
+  config.output_mode = requested_output_mode == 0 ? 0 : 2;
   config.edr_headroom = static_cast<float>(GetDouble(env, args[1]));
   config.luma_upscaler = GetInt32(env, args[2]);
   auto* presenter = erika_presenter_create_with_config(config);
@@ -115,7 +124,14 @@ napi_value NativeCreate(napi_env env, napi_callback_info info) {
     return Int64(env, 0);
   }
   const auto player_id = static_cast<int64_t>(reinterpret_cast<uintptr_t>(presenter));
-  g_players.emplace(player_id, OhosPlayer{presenter, nullptr});
+  auto* frame_driver = new (std::nothrow) ErikaHarmonyNextFrameDriver();
+  if (frame_driver == nullptr) {
+    erika_presenter_destroy(presenter);
+    return Int64(env, 0);
+  }
+  g_players.emplace(
+      player_id,
+      OhosPlayer{presenter, nullptr, requested_output_mode != 0, {}, frame_driver});
   return Int64(env, player_id);
 }
 
@@ -137,6 +153,8 @@ napi_value NativeDestroy(napi_env env, napi_callback_info info) {
   const auto found = g_players.find(player_id);
   if (found != g_players.end()) {
     ReleaseWindow(found->second);
+    delete found->second.frame_driver;
+    found->second.frame_driver = nullptr;
     erika_presenter_destroy(found->second.presenter);
     g_players.erase(found);
   }
@@ -220,20 +238,47 @@ napi_value NativeAttachSurface(napi_env env, napi_callback_info info) {
   const uint32_t width = static_cast<uint32_t>(GetInt32(env, args[2]));
   const uint32_t height = static_cast<uint32_t>(GetInt32(env, args[3]));
   const double scale = GetDouble(env, args[4]);
-  const auto status = erika_presenter_attach_wgpu_surface(
+  ErikaHarmonyNextConfigureSurface(
+      window, player->hdr_requested, &player->surface_state);
+  ErikaSurfaceOutputCapabilities capabilities = {};
+  capabilities.extended_linear = player->surface_state.hdr_surface_supported;
+  capabilities.direct_composition = true;
+  capabilities.desired_headroom = player->surface_state.hdr_surface_supported ? 4.0f : 1.0f;
+  capabilities.fallback_reason = player->surface_state.fallback_reason;
+  capabilities.native_data_space = player->surface_state.native_color_space;
+  const auto status = erika_presenter_attach_wgpu_surface_with_output_capabilities(
       player->presenter,
       ErikaWgpuSurfaceKind_OhosNativeWindow,
       static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window)),
       0,
       width,
       height,
-      scale);
+      scale,
+      capabilities);
   if (status != ErikaStatus_Ok) {
     OH_NativeWindow_DestroyNativeWindow(window);
     return Int32(env, status);
   }
   player->window = window;
+  if (player->frame_driver == nullptr || !player->frame_driver->Start(player->presenter)) {
+    player->surface_state.native_vsync_supported = false;
+    player->surface_state.fallback_reason = ErikaOutputFallbackReason_NativeVsyncUnavailable;
+    ReleaseWindow(*player);
+    return Int32(env, ErikaStatus_PlayerError);
+  }
+  player->surface_state.native_vsync_supported = true;
   return Int32(env, ErikaStatus_Ok);
+}
+
+napi_value NativeGetHdrCapabilitiesJson(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {};
+  napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+  OhosPlayer* player = argc == 0 ? nullptr : FindPlayer(GetInt64(env, args[0]));
+  if (player == nullptr) {
+    return String(env, R"({"known":false,"supportedDynamicRanges":[]})");
+  }
+  return String(env, ErikaHarmonyNextCapabilitiesJson(player->surface_state).c_str());
 }
 
 napi_value NativeResizeSurface(napi_env env, napi_callback_info info) {
@@ -267,11 +312,15 @@ napi_value NativeDetachSurface(napi_env env, napi_callback_info info) {
   if (player == nullptr) {
     return Int32(env, ErikaStatus_NullPointer);
   }
+  if (player->frame_driver != nullptr) {
+    player->frame_driver->Stop();
+  }
   const auto status = erika_presenter_detach_surface(player->presenter);
   if (player->window != nullptr) {
     OH_NativeWindow_DestroyNativeWindow(player->window);
     player->window = nullptr;
   }
+  player->surface_state = {};
   return Int32(env, status);
 }
 
@@ -397,6 +446,7 @@ napi_value Init(napi_env env, napi_value exports) {
       {"nativeDetachSurface", nullptr, NativeDetachSurface, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"nativeRenderTick", nullptr, NativeRenderTick, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"nativePollEvent", nullptr, NativePollEvent, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"nativeGetHdrCapabilitiesJson", nullptr, NativeGetHdrCapabilitiesJson, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"nativeAudioOnlyTick", nullptr, NativeAudioOnlyTick, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"nativeCaptureFrame", nullptr, NativeCaptureFrame, nullptr, nullptr, nullptr, napi_default, nullptr},
   };

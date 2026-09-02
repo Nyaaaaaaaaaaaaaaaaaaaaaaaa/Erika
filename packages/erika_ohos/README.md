@@ -1,12 +1,13 @@
 # erika
 
-Native ArkTS/HarmonyOS SDK powered by Erika. This package is independent of
+Native ArkTS/HarmonyOS NEXT SDK powered by Erika. This package is independent of
 Flutter and exposes the Erika presenter through an ArkTS-friendly API.
 
-The first package target is OpenHarmony arm64. The package contains the native
+The supported package target is HarmonyOS NEXT arm64 (API 18+, built with API
+20). The package contains the native
 N-API bridge and the matching `liberika_capi.so` runtime. A host application
-provides an `XComponent` surface id through `attachSurface()` and drives
-`renderTick()` from its frame scheduler.
+provides an `XComponent` surface id through `attachSurface()`. Native
+DisplaySoloist drives rendering from VSync.
 
 ## Installation
 
@@ -61,11 +62,6 @@ class ErikaSurfaceController extends XComponentController {
     this.startPendingUri();
   }
 
-  // Call this from the host's frame scheduler.
-  renderFrame(timeSeconds: number): ErikaNativeResponse {
-    return this.player.renderTick(timeSeconds);
-  }
-
   private startPendingUri(): void {
     if (!this.attached || this.pendingUri.length === 0) {
       return;
@@ -80,7 +76,7 @@ class ErikaSurfaceController extends XComponentController {
 
 Use the controller with an ArkUI surface. The controller queues `open()` until
 the first surface size callback has attached the native window, so the host can
-call it from `onLoad()`. Call `renderFrame()` from the display-frame callback:
+call it from `onLoad()`. Rendering starts automatically after surface attach:
 
 ```ts
 @Entry
@@ -104,8 +100,10 @@ struct VideoPage {
 }
 ```
 
-`renderTick()` returns an `ErikaNativeResponse` for diagnostics and frame
-status. `audioOnlyTick()` remains API-compatible for an AV1 session's ancillary
+`renderTick()` remains a compatibility/debug hook; applications do not need a
+timer or frame callback. `getHdrCapabilities()` reports negotiated window and
+VSync support, while `pollEvent()` emits de-duplicated complete output status
+snapshots. `audioOnlyTick()` remains API-compatible for an AV1 session's ancillary
 audio path; standalone audio-only input is rejected by this AV1/AVIF-specialized
 fork.
 

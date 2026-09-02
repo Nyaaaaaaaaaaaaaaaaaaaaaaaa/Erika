@@ -83,7 +83,7 @@ ErikaVideoView(player: player)
 
 ### Flutter package
 
-此 fork 尚未发布 pub.dev；请从本仓库依赖 Flutter package。`v0.1.8`
+此 fork 的 0.2.0 尚未发布 pub.dev；请从本仓库依赖 Flutter package。`v0.2.0`
 开始提供经过校验的组织内预编译原生库，包脚本默认从
 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 下载，也可通过
 `ERIKA_PREBUILT_REPOSITORY` 覆盖。只有调试 Erika 源码时才设置
@@ -91,12 +91,12 @@ ErikaVideoView(player: player)
 
 上游 pub.dev 包不代表本 fork 的 AV1/AVIF 支持边界。
 
-### OpenHarmony package
+### HarmonyOS NEXT package
 
 此 fork 尚未发布 OHPM 包；请从 `packages/erika_ohos` 源码集成。上游同名
 OHPM 包不代表本 fork 的 AV1/AVIF 支持边界。
 
-See the [OpenHarmony package guide](packages/erika_ohos/README.md) for the
+See the [HarmonyOS NEXT package guide](packages/erika_ohos/README.md) for the
 `ErikaPlayer` API and `XComponent` surface setup.
 
 ### Swift package
@@ -125,7 +125,7 @@ Erika 提供两组 C ABI 入口，适配不同嵌入场景：
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **可用** |
 | Linux | — | wgpu (planned) | — | 规划中 |
 | Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
-| HarmonyOS API 18+ | AV1 硬件 AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **可用**；硬件路径仍需真机验收 |
+| HarmonyOS NEXT 5.1 / API 18+ | AV1 硬件 AVCodec / dav1d | XComponent + OHNativeWindow，10-bit PQ / SDR 回退，DisplaySoloist VSync | OHAudio | **源码与构建链已接入**；HDR 真机验收待执行 |
 
 ## 仓库结构
 
@@ -134,7 +134,7 @@ crates/erika              核心播放库
 crates/erika_capi         C ABI 导出层
 crates/erika_ffmpeg_sys   FFmpeg 底层 bindings
 packages/erika_flutter    Flutter 插件 (macOS + iOS + tvOS + Windows + Android + HarmonyOS)
-packages/erika_ohos       OpenHarmony ArkTS / OHPM package
+packages/erika_ohos       HarmonyOS NEXT ArkTS / OHPM package
 examples/                 验证与演示程序
 xtask/                    原生依赖构建编排
 docs/                     架构与嵌入文档
@@ -148,6 +148,7 @@ docs/                     架构与嵌入文档
 - Swift SDK — 此 fork 尚未发布；不会向上游 `AimesSoft/ErikaSwift` 写入
 - [构建与依赖指南](docs/building.zh.md) — xtask、native 依赖、交叉编译
 - [Flutter 嵌入](docs/flutter_embedding.zh.md)
+- [HarmonyOS NEXT 支持契约](docs/harmonyos-next.md) — API 18 下限、API 20 构建、HDR 与 0.2 迁移
 - [平台能力矩阵](docs/platform_matrix.zh.md) — 区分可编译、CI 覆盖、真机验收与预编译发布
 - [发布与预编译产物](docs/releasing.md) — 各平台预编译 `erika_capi` 库下载与打包(英文)
 - [贡献 / 开发者指南](CONTRIBUTING.zh.md) — 仓库布局、线程模型、新增平台后端
@@ -160,7 +161,7 @@ docs/                     架构与嵌入文档
 - Xcode Command Line Tools (macOS/iOS/tvOS)
 - MSVC 工具链 + Windows SDK (Windows，target `x86_64-pc-windows-msvc`)
 - Android SDK + NDK r29，以及对应 Android Rust target
-- DevEco Studio OpenHarmony Native SDK，以及 Rust `aarch64-unknown-linux-ohos` target
+- DevEco Studio HarmonyOS 6 / API 20 SDK（兼容 API 18），以及 Rust `aarch64-unknown-linux-ohos` target
 - CMake, pkg-config
 
 ### 构建原生依赖
