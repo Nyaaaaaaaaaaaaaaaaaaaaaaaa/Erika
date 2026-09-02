@@ -82,6 +82,7 @@ jobs:
       - name: Package
         run: |
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           bash packaging/bundle.sh "erika-capi-macos-${{ matrix.arch }}" \
             "dist/erika-capi-macos-${{ matrix.arch }}.zip" \
             "out/${{ matrix.arch }}/liberika_capi.dylib" \
@@ -118,6 +119,7 @@ jobs:
       - name: Package
         run: |
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           bash packaging/bundle.sh erika-capi-macos-universal \
             dist/erika-capi-macos-universal.zip \
             out/universal/liberika_capi.dylib out/universal/liberika_capi.a
@@ -185,6 +187,7 @@ jobs:
       - name: Package
         run: |
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           bash packaging/bundle.sh erika-capi-ios \
             dist/erika-capi-ios.zip out/erika_capi.xcframework
       - uses: actions/upload-artifact@v4
@@ -249,6 +252,7 @@ jobs:
       - name: Package
         run: |
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           bash packaging/bundle.sh erika-capi-tvos \
             dist/erika-capi-tvos.zip out/erika_capi.xcframework
       - uses: actions/upload-artifact@v4
@@ -347,6 +351,7 @@ jobs:
         shell: bash
         run: |
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           R=target/${{ matrix.target }}/release
           bash packaging/bundle.sh erika-capi-windows-${{ matrix.arch }} \
             dist/erika-capi-windows-${{ matrix.arch }}.zip \
@@ -422,6 +427,7 @@ jobs:
         run: |
           set -euo pipefail
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           ERIKA_NATIVE_PROFILE="$PROFILE" bash packaging/bundle.sh \
             erika-capi-android dist/erika-capi-android.zip out/android
           for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
@@ -536,6 +542,7 @@ jobs:
         run: |
           set -euo pipefail
           unset GITHUB_SHA
+          export GITHUB_REF_NAME="${{ inputs.source_ref || github.ref_name }}"
           runtime="target/$ERIKA_NATIVE_TARGET/release/liberika_capi.so"
           plugin="$(find target/ohos-plugin-release -type f -name 'liberika_flutter.so' -print -quit)"
           readelf="$OHOS_SDK_NATIVE/llvm/bin/llvm-readelf"
