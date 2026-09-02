@@ -56,7 +56,8 @@ jobs:
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad # v1.0.1
         with:
-          version: "6.0.0"
+          # setup-ohos-sdk mirror tag; the SDK reports HarmonyOS 6 / API 20.
+          version: "6.0"
           components: native
           cache: true
       - name: Install native build tools

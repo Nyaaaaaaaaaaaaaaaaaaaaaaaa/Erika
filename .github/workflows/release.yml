@@ -21,6 +21,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Immutable vX.Y.Z tag to build and publish
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -51,6 +56,8 @@ jobs:
             runner: macos-26
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -74,6 +81,7 @@ jobs:
           install_name_tool -id @rpath/liberika_capi.dylib "out/${{ matrix.arch }}/liberika_capi.dylib"
       - name: Package
         run: |
+          unset GITHUB_SHA
           bash packaging/bundle.sh "erika-capi-macos-${{ matrix.arch }}" \
             "dist/erika-capi-macos-${{ matrix.arch }}.zip" \
             "out/${{ matrix.arch }}/liberika_capi.dylib" \
@@ -91,6 +99,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           pattern: erika-capi-macos-*
@@ -107,6 +117,7 @@ jobs:
           install_name_tool -id @rpath/liberika_capi.dylib out/universal/liberika_capi.dylib
       - name: Package
         run: |
+          unset GITHUB_SHA
           bash packaging/bundle.sh erika-capi-macos-universal \
             dist/erika-capi-macos-universal.zip \
             out/universal/liberika_capi.dylib out/universal/liberika_capi.a
@@ -125,6 +136,8 @@ jobs:
       LC_ALL: C
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
@@ -171,6 +184,7 @@ jobs:
             -output out/erika_capi.xcframework
       - name: Package
         run: |
+          unset GITHUB_SHA
           bash packaging/bundle.sh erika-capi-ios \
             dist/erika-capi-ios.zip out/erika_capi.xcframework
       - uses: actions/upload-artifact@v4
@@ -188,6 +202,8 @@ jobs:
       LC_ALL: C
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
@@ -232,6 +248,7 @@ jobs:
             -output out/erika_capi.xcframework
       - name: Package
         run: |
+          unset GITHUB_SHA
           bash packaging/bundle.sh erika-capi-tvos \
             dist/erika-capi-tvos.zip out/erika_capi.xcframework
       - uses: actions/upload-artifact@v4
@@ -259,6 +276,8 @@ jobs:
             msys2: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -327,6 +346,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          unset GITHUB_SHA
           R=target/${{ matrix.target }}/release
           bash packaging/bundle.sh erika-capi-windows-${{ matrix.arch }} \
             dist/erika-capi-windows-${{ matrix.arch }}.zip \
@@ -342,6 +362,8 @@ jobs:
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
@@ -399,6 +421,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset GITHUB_SHA
           ERIKA_NATIVE_PROFILE="$PROFILE" bash packaging/bundle.sh \
             erika-capi-android dist/erika-capi-android.zip out/android
           for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
@@ -425,6 +448,8 @@ jobs:
       OHOS_TARGET_SDK_VERSION: "20"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: aarch64-unknown-linux-ohos
@@ -432,7 +457,8 @@ jobs:
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad # v1.0.1
         with:
-          version: "6.0.0"
+          # setup-ohos-sdk mirror tag; the SDK reports HarmonyOS 6 / API 20.
+          version: "6.0"
           components: native
           cache: true
       - name: Install native build tools
@@ -509,6 +535,7 @@ jobs:
       - name: Verify and package OpenHarmony libraries
         run: |
           set -euo pipefail
+          unset GITHUB_SHA
           runtime="target/$ERIKA_NATIVE_TARGET/release/liberika_capi.so"
           plugin="$(find target/ohos-plugin-release -type f -name 'liberika_flutter.so' -print -quit)"
           readelf="$OHOS_SDK_NATIVE/llvm/bin/llvm-readelf"
@@ -537,7 +564,9 @@ jobs:
   release:
     name: Publish Release
     needs: [macos, macos-universal, ios, tvos, windows, android, openharmony]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.source_ref, 'v'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -559,6 +588,7 @@ jobs:
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.source_ref || github.ref_name }}
           files: |
             artifacts/**/*.zip
             SHA256SUMS
@@ -572,7 +602,7 @@ jobs:
             Each archive contains the library, `include/erika.h`, `LICENSE`
             (MPL-2.0), and `THIRD_PARTY_NOTICES.md`. `SHA256SUMS` in this
             release records the digest of every archive. See
-            [docs/capi_reference.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ github.ref_name }}/docs/capi_reference.md)
-            and [docs/integration.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ github.ref_name }}/docs/integration.md)
-            to integrate. Review [CHANGELOG.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ github.ref_name }}/CHANGELOG.md)
+            [docs/capi_reference.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ inputs.source_ref || github.ref_name }}/docs/capi_reference.md)
+            and [docs/integration.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ inputs.source_ref || github.ref_name }}/docs/integration.md)
+            to integrate. Review [CHANGELOG.md](https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika/blob/${{ inputs.source_ref || github.ref_name }}/CHANGELOG.md)
             before upgrading, especially the compatibility notes.
