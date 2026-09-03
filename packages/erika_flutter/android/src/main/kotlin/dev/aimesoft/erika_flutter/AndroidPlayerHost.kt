@@ -3,6 +3,8 @@ package dev.aimesoft.erika_flutter
 import android.view.Surface
 import java.util.concurrent.atomic.AtomicLong
 
+internal const val ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS = 250L
+
 internal class AndroidPlayerHost(
     val handle: Long,
     val requestedOutputMode: Int,
@@ -331,7 +333,7 @@ internal class AndroidPlayerHost(
             return try {
                 // nativeDestroy is already queued on the same serial owner. A no-op
                 // barrier therefore proves it has finished dropping the Surface.
-                presenterThread.callForSurfaceDestroy(SURFACE_DESTROY_TIMEOUT_MILLIS) { Unit }
+                presenterThread.callForSurfaceDestroy(ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS) { Unit }
                 NativeResponse.success()
             } catch (error: Throwable) {
                 NativeResponse(
@@ -346,7 +348,7 @@ internal class AndroidPlayerHost(
             return NativeResponse.success()
         }
         val response = try {
-            presenterThread.callForSurfaceDestroy(SURFACE_DESTROY_TIMEOUT_MILLIS) {
+            presenterThread.callForSurfaceDestroy(ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS) {
                 NativeJson.decodeResponse(ErikaNative.nativeDetachSurface(handle))
             }
         } catch (error: Throwable) {
@@ -475,7 +477,6 @@ internal class AndroidPlayerHost(
     private companion object {
         const val NO_OWNED_FD = -1
         const val MAX_PENDING_EVENTS = 1024
-        const val SURFACE_DESTROY_TIMEOUT_MILLIS = 250L
     }
 }
 

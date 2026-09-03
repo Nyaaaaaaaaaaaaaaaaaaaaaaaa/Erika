@@ -46,6 +46,19 @@ Pod::Spec.new do |s|
     erika_presenter_stop
     erika_presenter_track_selection
     erika_presenter_tracks
+    erika_image_attach_wgpu_surface
+    erika_image_cancel_decode
+    erika_image_decode_uri
+    erika_image_decode_uri_sized
+    erika_image_decode_uri_sized_with_policy
+    erika_image_destroy
+    erika_image_detach_surface
+    erika_image_get_metadata
+    erika_image_last_error_kind
+    erika_image_render_sdr_rgba
+    erika_image_render_surface
+    erika_image_resize_surface
+    erika_image_rgba_free
     erika_track_info_free
     erika_subtitle_memory_font_status_free
   ]
@@ -164,7 +177,7 @@ else
     if [ ! -f "$TARGET_FFMPEG_DIR/include/libavformat/avformat.h" ] || [ ! -f "$TARGET_DAV1D_DIR/include/dav1d/dav1d.h" ] || [ ! -f "$TARGET_DAV1D_DIR/lib/libdav1d.a" ] || [ ! -f "$ERIKA_DAV1D_MARKER" ] || ! grep -qx 'dav1d=1.5.1' "$ERIKA_DAV1D_MARKER"; then
       (cd "$SOURCE_ROOT" && cargo run -p xtask -- deps build --profile "$ERIKA_NATIVE_PROFILE" --target "$RUST_TARGET" --jobs "$HOST_JOBS")
     fi
-    (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$TARGET_FFMPEG_DIR" ERIKA_DAV1D_DIR="$TARGET_DAV1D_DIR" cargo rustc -p erika_capi --target "$RUST_TARGET" --no-default-features $CARGO_ARGS --lib --crate-type staticlib)
+    (cd "$SOURCE_ROOT" && ERIKA_NATIVE_PROFILE="$ERIKA_NATIVE_PROFILE" ERIKA_NATIVE_TARGET="$RUST_TARGET" ERIKA_FFMPEG_DIR="$TARGET_FFMPEG_DIR" ERIKA_DAV1D_DIR="$TARGET_DAV1D_DIR" cargo rustc -p erika_capi --target "$RUST_TARGET" --no-default-features --features wgpu $CARGO_ARGS --lib --crate-type staticlib)
     LIPO_INPUTS="$LIPO_INPUTS $SOURCE_ROOT/target/$RUST_TARGET/$CARGO_PROFILE/liberika_capi.a"
   done
 
@@ -180,6 +193,26 @@ if [ ! -f "$OUTPUT_LIB" ]; then
   echo "error: Erika C ABI static library not found: $OUTPUT_LIB" >&2
   exit 1
 fi
+for ERIKA_IMAGE_SYMBOL in \
+  erika_image_attach_wgpu_surface \
+  erika_image_cancel_decode \
+  erika_image_decode_uri \
+  erika_image_decode_uri_sized \
+  erika_image_decode_uri_sized_with_policy \
+  erika_image_destroy \
+  erika_image_detach_surface \
+  erika_image_get_metadata \
+  erika_image_last_error_kind \
+  erika_image_render_sdr_rgba \
+  erika_image_render_surface \
+  erika_image_resize_surface \
+  erika_image_rgba_free
+do
+  if ! xcrun nm -gU "$OUTPUT_LIB" | grep -q "_$ERIKA_IMAGE_SYMBOL"; then
+    echo "error: Erika iOS runtime is missing $ERIKA_IMAGE_SYMBOL" >&2
+    exit 1
+  fi
+done
 OUTPUT_ARCHS="$(xcrun lipo -archs "$OUTPUT_LIB")"
 case " $OUTPUT_ARCHS " in
   *" arm64 "*) ;;

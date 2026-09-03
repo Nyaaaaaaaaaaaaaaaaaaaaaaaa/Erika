@@ -23,6 +23,7 @@ set(ERIKA_HARMONY_NEXT_NATIVE
   "${CMAKE_CURRENT_SOURCE_DIR}/harmony_next")
 add_library(erika_ohos SHARED
   erika_ohos.cpp
+  erika_ohos_image.cpp
   "${ERIKA_HARMONY_NEXT_NATIVE}/erika_harmony_next_surface.cpp"
 )
 target_include_directories(erika_ohos PRIVATE

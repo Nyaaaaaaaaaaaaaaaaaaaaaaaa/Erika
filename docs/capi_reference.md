@@ -15,14 +15,16 @@ For the embedding walkthrough (surface attach, the render loop, teardown) see
 [integration.md](integration.md). For the high-level engine design see
 [architecture.md](architecture.md).
 
-## Two handle families
+## Three API families
 
-Erika exposes two independent entry points. Pick one per integration.
+Erika exposes three independent entry points. Pick the family that matches each
+media operation.
 
 | Handle | Model | Who renders | Use when |
 |--------|-------|-------------|----------|
 | `ErikaHandle` | **Pull** | The host | You own the render loop and pull decoded frames / drive your own compositor. |
 | `ErikaPresenterHandle` | **Push** | Erika | You give Erika a native surface and call `render_tick` once per display frame. Erika owns decode, timing, audio, overlays, and presentation. |
+| `ErikaImageHandle` | **Decode once** | Erika / the host surface | You need one static AVIF frame as cacheable SDR RGBA or on a native SDR/HDR surface, without a player, audio, or timeline. |
 
 `ErikaPresenterHandle` is the recommended path and what the Flutter plugin and
 the native demos use. It is compiled on **macOS, iOS, tvOS, Windows, Android,
@@ -33,8 +35,8 @@ channels already exchange structured serialized values. On unsupported targets
 `erika_presenter_create` may be exported but returns `NULL`; guard presenter
 usage by platform and by a successful create call.
 
-The two families do not share state; a process may use both, but a given media
-session lives in exactly one handle.
+The families do not share media state; a process may use them together, but a
+given playback session or decoded still lives in exactly one handle.
 
 ## Conventions
 
@@ -125,6 +127,93 @@ handle concurrently from multiple threads; serialize calls yourself (or confine
 a handle to one thread). The presenter's `render_tick` should be driven from the
 thread that owns the display timer / surface. Distinct handles on distinct
 threads are independent. Remember error messages are thread-local.
+
+The static-image registry synchronizes access so `erika_image_destroy` can wait
+for active calls, but hosts should still serialize operations on one
+`ErikaImageHandle` to preserve attach/resize/render/detach ordering. The one
+intentional cross-thread operation is `erika_image_cancel_decode`, which may be
+called while `erika_image_decode_uri` is running on a worker thread.
+
+## `ErikaImageHandle` — decode-once static images
+
+The static-image API decodes one CPU-readable AV1/AVIF frame with the software
+decoder. It does not create an `ErikaHandle`, `ErikaPresenterHandle`, audio
+session, playback timeline, or hardware video decoder. GPU rendering is then
+used for either bounded SDR RGBA output or a retained native SDR/HDR surface.
+
+### Entry points and ownership
+
+| Function | Purpose and ownership |
+|----------|-----------------------|
+| `erika_image_decode_uri` | Synchronously decodes one cached local source and returns a non-zero caller-owned `ErikaImageHandle`. `out_handle` is cleared before work starts. |
+| `erika_image_decode_uri_sized` | Additive sized-decode entry point. It preserves source metadata but bounds the retained NV12/P010 planes before GPU upload; zero bounds keep the legacy full-source behavior. |
+| `erika_image_decode_uri_sized_with_policy` | Sized decode with a caller-owned `ErikaImageDecodePolicy` for encoded bytes, source/output pixels, packet work, and timeout. `NULL` selects Erika defaults. |
+| `erika_image_cancel_decode` | Cooperatively cancels the process-unique decode `operation_id`; it is safe to call from another thread and also covers a cancellation that arrives just before decode starts. |
+| `erika_image_last_error_kind` | Returns the typed `ErikaImageErrorKind` for the latest failed image call on the current thread. Read it together with `erika_last_error_message` before another call on that thread. |
+| `erika_image_get_metadata` | Copies source dimensions, bit depth, colour metadata, dynamic range, and decode backend from a live handle into caller storage. |
+| `erika_image_render_sdr_rgba` | Consumes the decoded planes and GPU tone-maps/gamut-maps the complete image to bounded, tightly packed RGBA8888. The returned allocation belongs to the caller. |
+| `erika_image_rgba_free` | Releases an `ErikaImageRgba` returned by Erika and zeros the record. `NULL` and an already-zero record are safe. Never use libc `free()` for this buffer. |
+| `erika_image_attach_wgpu_surface` | Attaches a host-owned native surface and, on first attach, consumes the decoded planes into the handle's retained single-frame GPU renderer. |
+| `erika_image_resize_surface` | Updates the attached surface's physical pixel width/height and content scale. It does not present a frame. |
+| `erika_image_render_surface` | Presents the retained frame once and fills `ErikaOutputStatus` plus `ErikaDynamicRangeStatus` with the actual output result. |
+| `erika_image_detach_surface` | Detaches the native surface while retaining the uploaded frame so the same handle can attach to a replacement surface. |
+| `erika_image_destroy` | Closes the registry id, waits for active calls, detaches/releases renderer state, and frees the decoded image. Repeating it for the same non-zero old id is a no-op. |
+
+`erika_image_decode_uri` currently accepts only a cached local path, file URI,
+or owned-fd URI. Pass `NULL` or an otherwise empty/default
+`ErikaOpenOptions`; HTTP headers and read-ahead options are rejected. The
+`operation_id` must be non-zero and process-unique for the lifetime of the
+request. Decode is a blocking C call, so run it on a bounded worker queue rather
+than a UI thread. Cancellation is cooperative; the decode call reports
+`ErikaImageErrorKind_Cancelled` at its next cancellation boundary. Once decode
+has returned a handle, cancelling the old operation id does not destroy that
+handle.
+
+Source and output admission default to 32 Mi pixels. The policy-aware entry
+point lets the host choose any lower limit, while Erika retains a 32 Mi-pixel
+hard ceiling. Requested size bounds reduce retained planes and output work; the
+software decoder may still transiently materialize the admitted source frame.
+
+Image failures use the normal `ErikaStatus` and human-readable thread-local
+message plus the more specific `ErikaImageErrorKind` (`UnsupportedPlatform`,
+`UnsupportedFormat`, `Corrupt`, `Source`, `Network`, `Cancelled`,
+`ResourceLimit`, `Renderer`, `Internal`, or `Busy`). Both error values must be
+read on the thread that received the failure.
+
+### Choose one output path
+
+Decoded planes are consumed once. Choose one of these paths for each handle:
+
+- **SDR buffer:** call `erika_image_render_sdr_rgba`, copy or wrap the returned
+  RGBA bytes, call `erika_image_rgba_free`, and finally destroy the handle.
+  `max_width` and `max_height` are aspect-preserving pixel bounds; zero requests
+  the source dimension, still subject to Erika's output resource limits.
+- **Native surface:** attach, render, resize/render as needed, detach, then
+  destroy. The native window/layer remains owned by the host and must stay alive
+  until detach completes. Width and height are physical pixels.
+
+Surface lifecycle order is:
+
+```c
+ErikaImageHandle image = 0;
+erika_image_decode_uri(operation_id, cached_path, NULL, &image);
+erika_image_get_metadata(image, &metadata);
+erika_image_attach_wgpu_surface(image, kind, raw_window, raw_display,
+                                width_px, height_px, scale, capabilities);
+erika_image_render_surface(image, &output, &dynamic_range);
+/* on layout: resize, then render again */
+erika_image_detach_surface(image);
+/* the host may now release the native surface, or attach a replacement */
+erika_image_destroy(image);
+```
+
+An attached surface that cannot provide HDR does not make decode fail: Erika
+tone-maps the same complete source into SDR on that surface. Treat
+`ErikaDynamicRangeStatus.hdr_output_confirmed` after a successful present as the
+authoritative HDR signal; capability flags or successful attach alone are not
+proof of HDR output. Surface calls for one handle must remain ordered. Remove a
+platform view and wait for its detach barrier before releasing the host surface
+or destroying the image.
 
 ## `ErikaHandle` — pull model
 

@@ -423,6 +423,227 @@ pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeLastEr
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeDecodeImage(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    operation_id: jlong,
+    uri: JString<'_>,
+    max_width: jint,
+    max_height: jint,
+    max_input_bytes: jlong,
+    max_source_pixels: jlong,
+    max_output_pixels: jlong,
+    max_packets_before_frame: jint,
+    decode_timeout_millis: jlong,
+) -> jlong {
+    catch_unwind(AssertUnwindSafe(|| {
+        if operation_id <= 0 {
+            set_last_error("static image operation id must be positive");
+            return 0;
+        }
+        let uri: String = match env.get_string(&uri) {
+            Ok(uri) => uri.into(),
+            Err(error) => {
+                set_last_error(format!("invalid static image URI: {error}"));
+                return 0;
+            }
+        };
+        let uri = match CString::new(uri) {
+            Ok(uri) => uri,
+            Err(_) => {
+                set_last_error("static image URI contains an interior NUL");
+                return 0;
+            }
+        };
+        let mut handle = 0_u64;
+        let policy = ErikaImageDecodePolicy {
+            max_input_bytes: max_input_bytes.max(0) as u64,
+            max_source_pixels: max_source_pixels.max(0) as u64,
+            max_output_pixels: max_output_pixels.max(0) as u64,
+            max_packets_before_frame: max_packets_before_frame.max(0) as u32,
+            decode_timeout_millis: decode_timeout_millis.max(0) as u64,
+        };
+        let status = unsafe {
+            erika_image_decode_uri_sized_with_policy(
+                operation_id as u64,
+                uri.as_ptr(),
+                ptr::null(),
+                physical_dimension(max_width),
+                physical_dimension(max_height),
+                &policy,
+                &mut handle,
+            )
+        };
+        if matches!(status, ErikaStatus::Ok) {
+            handle as jlong
+        } else {
+            0
+        }
+    }))
+    .unwrap_or_else(|_| {
+        set_last_error("panic while decoding an Erika static image");
+        0
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeCancelImageDecode(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    operation_id: jlong,
+) {
+    if operation_id > 0 {
+        let _ = erika_image_cancel_decode(operation_id as u64);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeLastImageErrorKind(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jint {
+    erika_image_last_error_kind() as jint
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeImageMetadata(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        let mut metadata = ErikaImageMetadata::default();
+        call_status(unsafe { erika_image_get_metadata(handle as u64, &mut metadata) })?;
+        Ok(json!({
+            "width": metadata.width,
+            "height": metadata.height,
+            "bitDepth": metadata.bit_depth,
+            "primaries": metadata.primaries,
+            "transfer": metadata.transfer,
+            "matrix": metadata.matrix,
+            "colorRange": metadata.color_range,
+            "sourceDynamicRange": metadata.source_dynamic_range,
+            "decodeBackend": metadata.decode_backend,
+        }))
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeDestroyImage(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        call_status(erika_image_destroy(handle as u64))?;
+        Ok(Value::Null)
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeAttachImageSurface(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+    surface: JObject<'_>,
+    width: jint,
+    height: jint,
+    scale: jdouble,
+    extended_linear: jboolean,
+    direct_composition: jboolean,
+    desired_headroom: jfloat,
+    fallback_reason: jint,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        if surface.is_null() {
+            return Err("Android image Surface is null".to_string());
+        }
+        let native_window =
+            unsafe { NativeWindow::from_surface(env.get_native_interface(), surface.as_raw()) }
+                .ok_or_else(|| "ANativeWindow_fromSurface returned null".to_string())?;
+        call_status(unsafe {
+            erika_image_attach_wgpu_surface(
+                handle as u64,
+                ErikaWgpuSurfaceKind::AndroidNativeWindow,
+                native_window.ptr().as_ptr() as usize as u64,
+                0,
+                physical_dimension(width),
+                physical_dimension(height),
+                normalized_scale(scale),
+                ErikaSurfaceOutputCapabilities {
+                    extended_linear: extended_linear != 0,
+                    direct_composition: direct_composition != 0,
+                    desired_headroom,
+                    fallback_reason,
+                    native_data_space: -1,
+                },
+            )
+        })?;
+        Ok(Value::Null)
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeRenderImageSurface(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        let mut output = ErikaOutputStatus::default();
+        let mut range = ErikaDynamicRangeStatus::default();
+        call_status(unsafe { erika_image_render_surface(handle as u64, &mut output, &mut range) })?;
+        Ok(json!({
+            "activeEncoding": output.active_encoding,
+            "fallbackReason": output.fallback_reason,
+            "activeHeadroom": output.active_headroom,
+            "sourceDynamicRange": range.source_dynamic_range,
+            "activeDynamicRange": range.active_dynamic_range,
+            "hdrOutputConfirmed": range.hdr_output_confirmed,
+        }))
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeResizeImageSurface(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+    width: jint,
+    height: jint,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        call_status(unsafe {
+            erika_image_resize_surface(
+                handle as u64,
+                physical_dimension(width),
+                physical_dimension(height),
+                1.0,
+            )
+        })?;
+        Ok(Value::Null)
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeDetachImageSurface(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+) -> jstring {
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        call_status(unsafe { erika_image_detach_surface(handle as u64) })?;
+        Ok(Value::Null)
+    }));
+    response_to_jstring(&mut env, response)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_aimesoft_erika_1flutter_ErikaNative_nativeDestroy(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,

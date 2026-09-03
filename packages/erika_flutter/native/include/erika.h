@@ -283,6 +283,56 @@ typedef struct ErikaDynamicRangeStatus {
   bool hdr_output_confirmed;
 } ErikaDynamicRangeStatus;
 
+/* Stable decode-once image error category. Read on the same thread that
+ * received a failing erika_image_* result. */
+typedef enum ErikaImageErrorKind {
+  ErikaImageErrorKind_None = 0,
+  ErikaImageErrorKind_UnsupportedPlatform = 1,
+  ErikaImageErrorKind_UnsupportedFormat = 2,
+  ErikaImageErrorKind_Corrupt = 3,
+  ErikaImageErrorKind_Source = 4,
+  ErikaImageErrorKind_Network = 5,
+  ErikaImageErrorKind_Cancelled = 6,
+  ErikaImageErrorKind_ResourceLimit = 7,
+  ErikaImageErrorKind_Renderer = 8,
+  ErikaImageErrorKind_Internal = 9,
+  ErikaImageErrorKind_Busy = 10,
+} ErikaImageErrorKind;
+
+typedef uint64_t ErikaImageHandle;
+
+typedef struct ErikaImageMetadata {
+  uint32_t width;
+  uint32_t height;
+  uint32_t bit_depth;
+  uint32_t primaries;
+  uint32_t transfer;
+  uint32_t matrix;
+  uint32_t color_range;
+  int32_t source_dynamic_range;
+  int32_t decode_backend;
+} ErikaImageMetadata;
+
+typedef struct ErikaImageDecodePolicy {
+  uint64_t max_input_bytes;
+  uint64_t max_source_pixels;
+  uint64_t max_output_pixels;
+  uint32_t max_packets_before_frame;
+  uint64_t decode_timeout_millis;
+} ErikaImageDecodePolicy;
+
+typedef struct ErikaImageRgbaLayout {
+  uint32_t width;
+  uint32_t height;
+  uint32_t row_bytes;
+  uintptr_t byte_len;
+} ErikaImageRgbaLayout;
+
+typedef struct ErikaImageRgba {
+  uint8_t *data;
+  ErikaImageRgbaLayout layout;
+} ErikaImageRgba;
+
 /* Renderer memory snapshot. Per-resource fields are allocations tracked by
  * one presenter. device_current_allocated_bytes is Metal's device-wide
  * process counter and may include allocations owned by other presenters. */
@@ -449,6 +499,68 @@ typedef struct ErikaPresenterStats {
 } ErikaPresenterStats;
 
 /* ===== ErikaHandle (pull model) ===== */
+
+/* ===== Decode-once static images =====
+ * v1 accepts only a cached local path/file URI/fd URI. operation_id must be a
+ * process-unique non-zero id and can be cancelled from another thread. Image
+ * handles are synchronized registry ids: destroy closes the id, waits for
+ * active calls, detaches any surface, and releases the decoded frame. */
+ErikaStatus erika_image_decode_uri(
+    uint64_t operation_id,
+    const char *uri,
+    const ErikaOpenOptions *options,
+    ErikaImageHandle *out_handle);
+/* max_width/max_height bound the retained NV12/P010 planes before GPU upload;
+ * zero preserves full-source behaviour. */
+ErikaStatus erika_image_decode_uri_sized(
+    uint64_t operation_id,
+    const char *uri,
+    const ErikaOpenOptions *options,
+    uint32_t max_width,
+    uint32_t max_height,
+    ErikaImageHandle *out_handle);
+/* Caller-owned work and memory policy. A null policy uses Erika defaults. */
+ErikaStatus erika_image_decode_uri_sized_with_policy(
+    uint64_t operation_id,
+    const char *uri,
+    const ErikaOpenOptions *options,
+    uint32_t max_width,
+    uint32_t max_height,
+    const ErikaImageDecodePolicy *policy,
+    ErikaImageHandle *out_handle);
+ErikaStatus erika_image_cancel_decode(uint64_t operation_id);
+ErikaImageErrorKind erika_image_last_error_kind(void);
+ErikaStatus erika_image_destroy(ErikaImageHandle handle);
+ErikaStatus erika_image_get_metadata(
+    ErikaImageHandle handle,
+    ErikaImageMetadata *out_metadata);
+ErikaStatus erika_image_render_sdr_rgba(
+    ErikaImageHandle handle,
+    uint32_t max_width,
+    uint32_t max_height,
+    ErikaImageRgba *out_rgba);
+void erika_image_rgba_free(ErikaImageRgba *image);
+ErikaStatus erika_image_attach_wgpu_surface(
+    ErikaImageHandle handle,
+    ErikaWgpuSurfaceKind kind,
+    uint64_t raw_window,
+    uint64_t raw_display,
+    uint32_t width,
+    uint32_t height,
+    double scale,
+    ErikaSurfaceOutputCapabilities output_capabilities);
+ErikaStatus erika_image_resize_surface(
+    ErikaImageHandle handle,
+    uint32_t width,
+    uint32_t height,
+    double scale);
+ErikaStatus erika_image_render_surface(
+    ErikaImageHandle handle,
+    ErikaOutputStatus *out_status,
+    ErikaDynamicRangeStatus *out_dynamic_range);
+/* Detach preserves the uploaded still frame so the same handle can attach to
+ * a replacement Android/iOS surface. Final release happens in destroy. */
+ErikaStatus erika_image_detach_surface(ErikaImageHandle handle);
 
 /* Lifecycle and thread-local error retrieval. erika_create never fails. */
 ErikaHandle *erika_create(void);

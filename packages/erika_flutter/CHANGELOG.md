@@ -1,7 +1,18 @@
 # Changelog
 
+## Unreleased
+
 ## 0.2.0 - 2026-09-03
 
+- Added standalone decode-once static AVIF paths on Android and iOS: bounded
+  SDR external textures and native HDR/EDR surfaces without creating player,
+  audio, timeline state, or whole-image RGBA method-channel payloads.
+- Added the high-level `ErikaImage.file` API, which inspects decoded metadata,
+  selects HDR automatically when supported, and owns cancellation and native
+  resource lifetimes.
+- Exposed `ErikaImagePolicy` for app-owned source/output limits, parser work,
+  timeout, queueing, concurrency, physical-size buckets, cache budget, and
+  lifecycle trimming. Source and output limits now support up to 32 Mi pixels.
 - Added the HarmonyOS NEXT API 18+ HDR surface contract, API 20 build target,
   DisplaySoloist VSync, explicit SDR fallback, and confirmed-output events.
 - Added platform-neutral dynamic-range status/capabilities and `preferHdr`;

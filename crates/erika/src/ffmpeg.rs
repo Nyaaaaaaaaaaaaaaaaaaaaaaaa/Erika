@@ -2536,17 +2536,57 @@ impl Frame {
         }
     }
 
+    /// Repack a software frame into tightly packed GPU planes, scaling during
+    /// the swscale conversion when the retained static-image extent is smaller
+    /// than the decoded source. Ten-bit 4:2:0 inputs remain P010 so HDR colour
+    /// and transfer metadata can still be rendered by the native surface path.
+    pub fn to_planar_frame_sized(&self, width: u32, height: u32) -> Option<PlanarFrame> {
+        if width == self.width() as u32 && height == self.height() as u32 {
+            return self.to_planar_frame();
+        }
+        let output_format = match self.raw_pixel_format() {
+            sys::AVPixelFormat_AV_PIX_FMT_YUV420P10LE | sys::AVPixelFormat_AV_PIX_FMT_P010LE => {
+                PlanarPixelFormat::P010
+            }
+            _ => PlanarPixelFormat::Nv12,
+        };
+        self.to_planar_with_swscale(width, height, output_format)
+    }
+
     fn to_nv12_with_swscale(&self) -> Option<PlanarFrame> {
-        let width = self.width() as usize;
-        let height = self.height() as usize;
-        if width == 0 || height == 0 {
+        self.to_planar_with_swscale(
+            self.width() as u32,
+            self.height() as u32,
+            PlanarPixelFormat::Nv12,
+        )
+    }
+
+    fn to_planar_with_swscale(
+        &self,
+        output_width: u32,
+        output_height: u32,
+        output_format: PlanarPixelFormat,
+    ) -> Option<PlanarFrame> {
+        let source_width = self.width() as usize;
+        let source_height = self.height() as usize;
+        let width = output_width as usize;
+        let height = output_height as usize;
+        if source_width == 0 || source_height == 0 || width == 0 || height == 0 {
             return None;
         }
+        let source_width_i32 = i32::try_from(source_width).ok()?;
+        let source_height_i32 = i32::try_from(source_height).ok()?;
         let width_i32 = i32::try_from(width).ok()?;
         let height_i32 = i32::try_from(height).ok()?;
         let chroma_width = width.div_ceil(2);
         let chroma_height = height.div_ceil(2);
-        let chroma_row_bytes = chroma_width.checked_mul(2)?;
+        let bytes_per_sample = match output_format {
+            PlanarPixelFormat::Nv12 => 1,
+            PlanarPixelFormat::P010 => 2,
+        };
+        let luma_row_bytes = width.checked_mul(bytes_per_sample)?;
+        let chroma_row_bytes = chroma_width.checked_mul(2)?.checked_mul(bytes_per_sample)?;
+        let luma_linesize = i32::try_from(luma_row_bytes).ok()?;
         let chroma_linesize = i32::try_from(chroma_row_bytes).ok()?;
         let format = self.raw_pixel_format();
         if format < 0
@@ -2559,12 +2599,15 @@ impl Frame {
         unsafe {
             let frame = &*self.ptr;
             let context = sys::sws_getContext(
-                width_i32,
-                height_i32,
+                source_width_i32,
+                source_height_i32,
                 format,
                 width_i32,
                 height_i32,
-                sys::AVPixelFormat_AV_PIX_FMT_NV12,
+                match output_format {
+                    PlanarPixelFormat::Nv12 => sys::AVPixelFormat_AV_PIX_FMT_NV12,
+                    PlanarPixelFormat::P010 => sys::AVPixelFormat_AV_PIX_FMT_P010LE,
+                },
                 sys::ERIKA_SWS_BILINEAR,
                 ptr::null_mut(),
                 ptr::null_mut(),
@@ -2574,21 +2617,21 @@ impl Frame {
                 return None;
             }
 
-            let mut luma = vec![0u8; width * height];
-            let mut chroma = vec![0u8; chroma_row_bytes * chroma_height];
+            let mut luma = vec![0u8; luma_row_bytes.checked_mul(height)?];
+            let mut chroma = vec![0u8; chroma_row_bytes.checked_mul(chroma_height)?];
             let mut dst_data = [
                 luma.as_mut_ptr(),
                 chroma.as_mut_ptr(),
                 ptr::null_mut(),
                 ptr::null_mut(),
             ];
-            let mut dst_linesize = [width_i32, chroma_linesize, 0, 0];
+            let mut dst_linesize = [luma_linesize, chroma_linesize, 0, 0];
             let converted = sys::sws_scale(
                 context,
                 frame.data.as_ptr() as *const *const u8,
                 frame.linesize.as_ptr(),
                 0,
-                height_i32,
+                source_height_i32,
                 dst_data.as_mut_ptr(),
                 dst_linesize.as_mut_ptr(),
             );
@@ -2598,7 +2641,7 @@ impl Frame {
             }
 
             Some(PlanarFrame {
-                format: PlanarPixelFormat::Nv12,
+                format: output_format,
                 width: width as u32,
                 height: height as u32,
                 luma,

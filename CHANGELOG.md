@@ -2,6 +2,13 @@
 
 ## 0.2.0 - 2026-09-03
 
+- Added a decode-once static-image pipeline with bounded SDR textures and
+  native HDR/EDR surfaces, without creating player, audio, or timeline state.
+- Added caller-owned image decode policy for encoded/source/output limits,
+  parser work, timeout, queueing, concurrency, cache budget, and lifecycle
+  trimming; source and output limits support up to 32 Mi pixels.
+- Added the high-level Flutter `ErikaImage.file` API with automatic HDR
+  selection from decoded metadata and device output capability.
 - Added the HarmonyOS NEXT API 18+ / API 20 build contract, verified native HDR
   surface negotiation, DisplaySoloist VSync, stable dynamic-range status, and
   explicit SDR fallback.

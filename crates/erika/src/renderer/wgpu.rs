@@ -19,7 +19,6 @@ use wgpu::util::DeviceExt;
 
 #[cfg(target_os = "android")]
 use crate::android::{AndroidDataSpaceErrorKind, AndroidNativeWindow};
-#[cfg(target_os = "android")]
 use crate::core::ColorPrimaries;
 #[cfg(any(
     target_os = "android",
@@ -54,7 +53,9 @@ use crate::renderer::output::{
     ActiveOutputEncoding, DynamicRange, OutputColorSpace, OutputDescription, OutputFallbackReason,
     OutputMode, OutputRuntimeStatus, OutputSurfaceFormat,
 };
-use crate::renderer::pipeline::{LumaUpscalerMode, SourceColorState, VideoRenderPipeline};
+use crate::renderer::pipeline::{
+    LumaUpscalerMode, SourceColorState, TargetColorState, VideoRenderPipeline,
+};
 use crate::renderer::presentation::{PresentationLayout, PresentationRect};
 use crate::renderer::wgpu_artcnn::{
     WgpuArtCnn, WgpuArtCnnInput, WgpuArtCnnInputKind, WgpuArtCnnStatus,
@@ -603,6 +604,19 @@ fn preferred_sdr_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu:
     })
 }
 
+fn platform_extended_linear_output(headroom: f32) -> OutputDescription {
+    #[cfg(any(target_os = "ios", target_os = "macos", target_os = "tvos"))]
+    {
+        // Apple EDR uses 203 nit reference white on a CAMetalLayer. Reusing
+        // Android scRGB's 80 nit convention would change perceived brightness.
+        return OutputDescription::apple_edr(headroom);
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "macos", target_os = "tvos")))]
+    {
+        OutputDescription::extended_linear(headroom)
+    }
+}
+
 fn select_wgpu_surface_output(
     requested: OutputMode,
     capabilities: SurfaceOutputCapabilities,
@@ -623,6 +637,24 @@ fn select_wgpu_surface_output(
         OutputMode::ExtendedLinear { .. } if !capabilities.direct_composition => {
             OutputFallbackReason::HybridCompositionRequired
         }
+        // Direct Android/OpenHarmony output is the Vulkan scRGB/10-bit path.
+        // Apple CAMetalLayer surfaces are instead backed by Metal; requiring
+        // Vulkan there would force every iOS still image back to SDR.
+        #[cfg(any(target_os = "android", target_env = "ohos"))]
+        OutputMode::ExtendedLinear { .. } if backend != wgpu::Backend::Vulkan => {
+            OutputFallbackReason::WgpuBackendNotVulkan
+        }
+        #[cfg(any(target_os = "ios", target_os = "macos", target_os = "tvos"))]
+        OutputMode::ExtendedLinear { .. } if backend != wgpu::Backend::Metal => {
+            OutputFallbackReason::SurfaceConfigureFailed
+        }
+        #[cfg(not(any(
+            target_os = "android",
+            target_env = "ohos",
+            target_os = "ios",
+            target_os = "macos",
+            target_os = "tvos"
+        )))]
         OutputMode::ExtendedLinear { .. } if backend != wgpu::Backend::Vulkan => {
             OutputFallbackReason::WgpuBackendNotVulkan
         }
@@ -647,7 +679,7 @@ fn select_wgpu_surface_output(
             #[cfg(not(target_env = "ohos"))]
             let (format, output) = (
                 wgpu::TextureFormat::Rgba16Float,
-                OutputDescription::extended_linear(headroom),
+                platform_extended_linear_output(headroom),
             );
             #[cfg(target_env = "ohos")]
             let _ = headroom;
@@ -1479,7 +1511,14 @@ impl WgpuRenderer {
         self.output_status.active_encoding = match attached.output.color_space {
             OutputColorSpace::Bt2020Pq => ActiveOutputEncoding::Hdr10Pq,
             _ if attached.output.extended_linear => {
-                ActiveOutputEncoding::AndroidExtendedLinearScRgb
+                #[cfg(any(target_os = "ios", target_os = "macos", target_os = "tvos"))]
+                {
+                    ActiveOutputEncoding::AppleEdr
+                }
+                #[cfg(not(any(target_os = "ios", target_os = "macos", target_os = "tvos")))]
+                {
+                    ActiveOutputEncoding::AndroidExtendedLinearScRgb
+                }
             }
             _ => ActiveOutputEncoding::SdrSrgb,
         };
@@ -1502,7 +1541,8 @@ impl WgpuRenderer {
         self.output_status.extended_linear_active = attached.output.extended_linear;
         self.output_status.active_dynamic_range = match attached.output.color_space {
             OutputColorSpace::Bt2020Pq => DynamicRange::Hdr10Pq,
-            OutputColorSpace::Srgb | OutputColorSpace::ExtendedSrgbLinear => DynamicRange::Sdr,
+            OutputColorSpace::ExtendedSrgbLinear => DynamicRange::Unknown,
+            OutputColorSpace::Srgb => DynamicRange::Sdr,
         };
         self.output_status.hdr_output_confirmed = false;
         self.output_status.fallback_reason = attached.fallback_reason;
@@ -1533,7 +1573,7 @@ impl WgpuRenderer {
                 attached.handle.output_capabilities,
                 state,
             );
-            attached.output = OutputDescription::extended_linear(effective);
+            attached.output = platform_extended_linear_output(effective);
             effective_content_headroom = Some(effective);
             extended_linear_active = true;
         }
@@ -2379,6 +2419,44 @@ impl WgpuRenderer {
             height,
             rgba,
         }))
+    }
+
+    /// Decode-once image entry point. Unlike `upload_player_frame`, this takes
+    /// no playback state and preserves the caller-provided source metadata.
+    pub fn upload_static_planar(
+        &mut self,
+        frame: PlanarFrame,
+        source: SourceColorState,
+        extended_linear_output: bool,
+    ) -> Result<()> {
+        let is_p010 = matches!(frame.format, PlanarPixelFormat::P010);
+        let target = if extended_linear_output {
+            TargetColorState::extended_linear(ColorPrimaries::Bt2020, 203.0, 4.0)
+        } else {
+            self.surface.as_ref().map_or_else(
+                || TargetColorState::sdr(ColorPrimaries::Bt709),
+                |surface| surface.output.target,
+            )
+        };
+        let pipeline = VideoRenderPipeline::new(source, target);
+        self.output_status.source_dynamic_range = match source.transfer {
+            TransferFunction::Pq => DynamicRange::Hdr10Pq,
+            TransferFunction::Hlg => DynamicRange::Hlg,
+            TransferFunction::Unknown => DynamicRange::Unknown,
+            TransferFunction::Srgb | TransferFunction::Bt1886 => DynamicRange::Sdr,
+        };
+        let uniforms = VideoUniforms::from_pipeline(&pipeline, is_p010, target.edr_headroom > 1.0);
+        self.upload_planar_with_context(frame, uniforms, Some(source))
+    }
+
+    /// Sized offscreen readback used by the static-image API. The result is
+    /// always SDR RGBA8 and therefore safe for Flutter's ordinary ImageCache.
+    pub fn render_current_offscreen_sized_for_image(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> Result<Option<WgpuOffscreenReadback>> {
+        self.render_current_offscreen_sized(width, height, None, None)
     }
 
     /// Encode and submit a render pass drawing the current video frame into
@@ -3573,7 +3651,7 @@ impl WgpuRenderer {
             surface.configure(&self.device, &config);
             let mut output = selection.output;
             if output.extended_linear {
-                output = OutputDescription::extended_linear(effective_extended_linear_headroom(
+                output = platform_extended_linear_output(effective_extended_linear_headroom(
                     self.output_mode,
                     handle.output_capabilities,
                     self.output_headroom,
@@ -4110,6 +4188,13 @@ impl RendererBackend for WgpuRenderer {
             if source_is_hdr {
                 self.stats.hdr10_output_frames = self.stats.hdr10_output_frames.saturating_add(1);
             }
+        } else if output.extended_linear {
+            self.output_status.hdr_output_confirmed = source_is_hdr;
+            self.output_status.active_dynamic_range = if source_is_hdr {
+                self.output_status.source_dynamic_range
+            } else {
+                DynamicRange::Sdr
+            };
         } else {
             self.output_status.hdr_output_confirmed = false;
             self.output_status.active_dynamic_range = DynamicRange::Sdr;

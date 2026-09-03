@@ -2023,6 +2023,7 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
   private static let playerChannelName = "erika_flutter/player"
   private static let eventsChannelName = "erika_flutter/events"
   private static let videoViewType = "erika_flutter/video_view"
+  private static let hdrImageViewType = "erika_flutter/hdr_image_view"
 
   private var players: [Int64: ErikaPlayerHost] = [:]
   private var views: [Int64: WeakErikaVideoPlatformViewBox] = [:]
@@ -2034,8 +2035,10 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
   private var notificationObservers: [NSObjectProtocol] = []
   private var remoteCommandTargets: [(MPRemoteCommand, Any)] = []
   private var systemMediaNavigation: [Int64: (previousEnabled: Bool, nextEnabled: Bool)] = [:]
+  private var imageSubsystem: ErikaIOSImageSubsystem?
 
   deinit {
+    imageSubsystem?.shutdown()
     interruptionResumeWorkItem?.cancel()
     notificationObservers.forEach(NotificationCenter.default.removeObserver)
     remoteCommandTargets.forEach { command, target in
@@ -2048,14 +2051,81 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     instance.configureSystemPlayback()
     let playerChannel = FlutterMethodChannel(name: playerChannelName, binaryMessenger: registrar.messenger())
     let eventsChannel = FlutterEventChannel(name: eventsChannelName, binaryMessenger: registrar.messenger())
+    let imageSubsystem = ErikaIOSImageSubsystem(
+      channel: playerChannel,
+      textureRegistry: registrar.textures()
+    )
+    instance.imageSubsystem = imageSubsystem
     registrar.addMethodCallDelegate(instance, channel: playerChannel)
     eventsChannel.setStreamHandler(instance)
     registrar.register(ErikaVideoViewFactory(plugin: instance), withId: videoViewType)
+    registrar.register(
+      ErikaIOSHdrImageViewFactory(subsystem: imageSubsystem),
+      withId: hdrImageViewType
+    )
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     do {
       switch call.method {
+      case "configureImagePipeline":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        try imageSubsystem.configure(try dictionaryArgs(call.arguments), result: result)
+      case "getImageCapabilities":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.capabilities(result)
+      case "decodeImage":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.decodeImage(try dictionaryArgs(call.arguments), result: result)
+      case "decodeSdrTexture":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.decodeSdr(try dictionaryArgs(call.arguments), result: result)
+      case "disposeSdrTexture":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.disposeSdrTexture(try dictionaryArgs(call.arguments), result: result)
+      case "decodeHdrImage":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.decodeHdr(try dictionaryArgs(call.arguments), result: result)
+      case "disposeHdrImage":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.disposeHdr(try dictionaryArgs(call.arguments), result: result)
+      case "cancelImageDecode":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.cancel(try dictionaryArgs(call.arguments), result: result)
+      case "getImageDiagnostics":
+        guard let imageSubsystem else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        imageSubsystem.diagnostics(
+          result,
+          playerCount: players.count,
+          videoViewCount: views.count
+        )
       case "create":
         result(try createPlayer(arguments: call.arguments))
       case "dispose":

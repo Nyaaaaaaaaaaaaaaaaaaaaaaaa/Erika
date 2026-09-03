@@ -2,6 +2,7 @@ package dev.aimesoft.erika_flutter
 
 import android.content.Context
 import android.content.res.AssetFileDescriptor
+import android.app.Activity
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +24,7 @@ import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.TextureRegistry
 import java.io.EOFException
 import java.io.File
 import java.io.FileDescriptor
@@ -31,14 +33,91 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CancellationException
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
+
+private class AndroidImageDecodeJob(
+    val dartOperationId: Long,
+    val nativeOperationId: Long,
+    val engineGeneration: Long,
+    val result: MethodChannel.Result,
+) {
+    val cancelled = AtomicBoolean(false)
+    val completed = AtomicBoolean(false)
+    val started = AtomicBoolean(false)
+    val ownsHdrReservation = AtomicBoolean(false)
+
+    @Volatile
+    var future: Future<*>? = null
+}
+
+private class AndroidImageDecodeException(
+    val kind: Int,
+    message: String,
+) : IllegalStateException(message)
+
+private data class AndroidImagePolicy(
+    val maxEncodedBytes: Long,
+    val maxSourcePixels: Long,
+    val maxOutputPixels: Long,
+    val maxPacketsBeforeFrame: Int,
+    val decodeTimeoutMillis: Long,
+    val maxQueuedDecodes: Int,
+    val maxConcurrentDecodes: Int,
+)
+
+internal class AndroidSdrImageTexture(
+    val plugin: ErikaFlutterPlugin,
+    val producer: TextureRegistry.SurfaceProducer,
+    val handle: Long,
+    val width: Int,
+    val height: Int,
+    val engineGeneration: Long,
+) : TextureRegistry.SurfaceProducer.Callback {
+    val disposed = AtomicBoolean(false)
+    val surfaceAttached = AtomicBoolean(false)
+
+    val textureId: Long
+        get() = producer.id()
+
+    override fun onSurfaceAvailable() {
+        plugin.renderSdrImageTexture(this)
+    }
+
+    override fun onSurfaceCleanup() {
+        plugin.detachSdrImageTextureSurface(this)
+    }
+}
+
+private fun boundedImageExtent(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    requestedWidth: Int,
+    requestedHeight: Int,
+): Pair<Int, Int> {
+    require(sourceWidth > 0 && sourceHeight > 0) { "invalid source image dimensions" }
+    val maxWidth = if (requestedWidth > 0) requestedWidth else sourceWidth
+    val maxHeight = if (requestedHeight > 0) requestedHeight else sourceHeight
+    if (sourceWidth <= maxWidth && sourceHeight <= maxHeight) {
+        return sourceWidth to sourceHeight
+    }
+    return if (maxWidth.toLong() * sourceHeight <= maxHeight.toLong() * sourceWidth) {
+        maxWidth to maxOf(1, sourceHeight.toLong().times(maxWidth).div(sourceWidth).toInt())
+    } else {
+        maxOf(1, sourceWidth.toLong().times(maxHeight).div(sourceHeight).toInt()) to maxHeight
+    }
+}
 
 class ErikaFlutterPlugin :
     FlutterPlugin,
@@ -55,16 +134,40 @@ class ErikaFlutterPlugin :
     private lateinit var mainHandler: Handler
     private lateinit var presenterThread: AndroidPresenterThread
     private lateinit var contentPreparationExecutor: ExecutorService
+    private lateinit var imageDecodeExecutor: ThreadPoolExecutor
+    private lateinit var imageSurfaceExecutor: ExecutorService
+    private lateinit var imageCleanupExecutor: ExecutorService
+    private lateinit var textureRegistry: TextureRegistry
     private val presenterCreates = AndroidPresenterCreateRegistry<AndroidPresenterThread>()
+    @Volatile
     private var engineAttachmentGeneration = 0L
     @Volatile
     private var contentSpoolScavengeFuture: Future<*>? = null
     private val players = linkedMapOf<Long, AndroidPlayerHost>()
+    private val imageDecodeJobsByDartOperationId =
+        ConcurrentHashMap<Long, AndroidImageDecodeJob>()
+    private val hdrImageHandles = ConcurrentHashMap.newKeySet<Long>()
+    private val sdrImageTextures = ConcurrentHashMap<Long, AndroidSdrImageTexture>()
+    private val imageOwnershipLock = Any()
+    private var hdrImageDecodeReserved = false
+    @Volatile private var imageSubsystemClosing = false
+    @Volatile private var imagePolicy = DEFAULT_IMAGE_POLICY
+    private val hdrImageViewOwners = ConcurrentHashMap<Long, HdrImageViewOwner>()
+    private val hdrImageViews = ConcurrentHashMap<Int, Long>()
+    private val hdrImageSurfaceGenerations =
+        ConcurrentHashMap<Int, HdrImageSurfaceGeneration>()
+    private val hdrImagesDisposing = ConcurrentHashMap.newKeySet<Long>()
+    private val imageDecodeCount = AtomicLong(0L)
+    private val imageDecodeInflight = AtomicInteger(0)
+    private val imageActiveHandles = AtomicInteger(0)
+    private val imageQueuedCancelled = AtomicLong(0L)
     private val videoViews = linkedMapOf<Int, ErikaAndroidVideoView>()
     private var eventSink: EventChannel.EventSink? = null
     private var frameScheduled = false
+    @Volatile
     private var attachedToEngine = false
     private var activityLifecycle: Lifecycle? = null
+    private var activity: Activity? = null
     private var activityActive = false
     private var activeMediaPlayerId: Long? = null
     private val renderRequests = AndroidLatestTaskCoalescer<AndroidRenderRequest>()
@@ -79,7 +182,6 @@ class ErikaFlutterPlugin :
 
     internal val isActivityActive: Boolean
         get() = attachedToEngine && activityActive
-
     private val frameCallback = Choreographer.FrameCallback { frameTimeNanos ->
         frameScheduled = false
         if (!isActivityActive) {
@@ -110,6 +212,7 @@ class ErikaFlutterPlugin :
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
+        textureRegistry = binding.textureRegistry
         choreographer = Choreographer.getInstance()
         mainHandler = Handler(Looper.getMainLooper())
         presenterThread = AndroidPresenterThread()
@@ -119,6 +222,14 @@ class ErikaFlutterPlugin :
         eventPollQueued.set(false)
         immediateEventPollLatch.clear()
         contentPreparationExecutor = newContentPreparationExecutor()
+        imageDecodeExecutor = newImageDecodeExecutor(imagePolicy)
+        imageSubsystemClosing = false
+        imageSurfaceExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "erika-image-surface").apply { isDaemon = true }
+        }
+        imageCleanupExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "erika-image-cleanup").apply { isDaemon = true }
+        }
         contentSpoolScavengeFuture = scheduleContentSpoolStartupScavenge()
         audioFocus = ErikaAudioFocus(
             applicationContext,
@@ -153,12 +264,25 @@ class ErikaFlutterPlugin :
             HDR_VIDEO_VIEW_TYPE,
             ErikaAndroidVideoViewFactory(this, useHdrSurface = true),
         )
+        binding.platformViewRegistry.registerViewFactory(
+            HDR_IMAGE_VIEW_TYPE,
+            ErikaAndroidHdrImageViewFactory(this, engineAttachmentGeneration),
+        )
         attachedToEngine = true
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         detachFromActivity()
         attachedToEngine = false
+        val retiringEngineGeneration = engineAttachmentGeneration
+        val retiringImageDecodeExecutor = imageDecodeExecutor
+        val retiringImageSurfaceExecutor = imageSurfaceExecutor
+        val retiringImageCleanupExecutor = imageCleanupExecutor
+        val closingImages = synchronized(imageOwnershipLock) {
+            imageSubsystemClosing = true
+            hdrImageDecodeReserved = false
+            hdrImageHandles.toList() to sdrImageTextures.values.toList()
+        }
         val retiringPresenterThread = presenterThread
         presenterCreates.detach(retiringPresenterThread).forEach { pending ->
             if (!retiringPresenterThread.post { ErikaNative.nativeDestroy(pending.handle) }) {
@@ -187,6 +311,56 @@ class ErikaFlutterPlugin :
         if (::contentPreparationExecutor.isInitialized) {
             contentPreparationExecutor.shutdownNow()
         }
+        imageDecodeJobsByDartOperationId.values.forEach { job ->
+            job.cancelled.set(true)
+            ErikaNative.nativeCancelImageDecode(job.nativeOperationId)
+            job.future?.cancel(true)
+        }
+        imageDecodeJobsByDartOperationId.clear()
+        if (::imageDecodeExecutor.isInitialized) {
+            closingImages.first.forEach { imageId ->
+                retiringImageSurfaceExecutor.execute {
+                    ErikaNative.nativeDetachImageSurface(imageId)
+                    retiringImageCleanupExecutor.execute {
+                        val response = NativeJson.decodeResponse(ErikaNative.nativeDestroyImage(imageId))
+                        if (response.ok && hdrImageHandles.remove(imageId)) {
+                            imageActiveHandles.decrementAndGet()
+                        } else if (!response.ok) {
+                            Log.e(TAG, "Unable to destroy HDR image $imageId: ${response.error}")
+                        }
+                    }
+                }
+            }
+            closingImages.second.forEach { texture ->
+                if (!texture.disposed.compareAndSet(false, true)) return@forEach
+                sdrImageTextures.remove(texture.textureId, texture)
+                texture.producer.setCallback(null)
+                retiringImageSurfaceExecutor.execute {
+                    if (texture.surfaceAttached.compareAndSet(true, false)) {
+                        ErikaNative.nativeDetachImageSurface(texture.handle)
+                    }
+                    val response = NativeJson.decodeResponse(
+                        ErikaNative.nativeDestroyImage(texture.handle),
+                    )
+                    if (response.ok) imageActiveHandles.decrementAndGet()
+                    else Log.e(
+                        TAG,
+                        "Unable to destroy SDR texture ${texture.textureId}: ${response.error}",
+                    )
+                    mainHandler.post(texture.producer::release)
+                }
+            }
+            retiringImageSurfaceExecutor.execute { retiringImageCleanupExecutor.shutdown() }
+            hdrImageViewOwners.entries.removeIf {
+                it.value.engineGeneration == retiringEngineGeneration
+            }
+            hdrImageViews.entries.removeIf { it.value == retiringEngineGeneration }
+            hdrImageSurfaceGenerations.entries.removeIf {
+                it.value.engineGeneration == retiringEngineGeneration
+            }
+            retiringImageDecodeExecutor.shutdown()
+        }
+        if (::imageSurfaceExecutor.isInitialized) retiringImageSurfaceExecutor.shutdown()
         audioFocus.abandon()
         ErikaMediaCommandReceiver.unregister(this)
         ErikaMediaPlaybackService.unregisterTickHandler(this)
@@ -235,6 +409,15 @@ class ErikaFlutterPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
+                "configureImagePipeline" -> configureImagePipeline(arguments(call), result)
+                "getImageCapabilities" -> getImageCapabilities(result)
+                "decodeImage" -> decodeImage(arguments(call), result)
+                "decodeSdrTexture" -> decodeSdrTexture(arguments(call), result)
+                "decodeHdrImage" -> decodeHdrImage(arguments(call), result)
+                "disposeSdrTexture" -> disposeSdrTexture(arguments(call), result)
+                "disposeHdrImage" -> disposeHdrImage(arguments(call), result)
+                "cancelImageDecode" -> cancelImageDecode(arguments(call), result)
+                "getImageDiagnostics" -> getImageDiagnostics(result)
                 "create" -> createPlayer(arguments(call), result)
                 "dispose" -> disposePlayer(arguments(call), result)
                 "attachView" -> attachView(arguments(call), result)
@@ -257,6 +440,828 @@ class ErikaFlutterPlugin :
                 null,
             )
         }
+    }
+
+    private fun getImageCapabilities(result: MethodChannel.Result) {
+        val policy = imagePolicy
+        result.success(
+            mapOf(
+                "sdrDecodeSupported" to true,
+                "hdrSurfaceSupported" to if (android.os.Build.VERSION.SDK_INT >= 24) {
+                    activity?.display?.isHdr == true
+                } else {
+                    false
+                },
+                "networkSourceSupported" to false,
+                "activeBackend" to "software",
+                "maxEncodedBytes" to policy.maxEncodedBytes,
+                "maxSourcePixels" to policy.maxSourcePixels,
+                "maxOutputPixels" to policy.maxOutputPixels,
+                "maxConcurrentDecodes" to policy.maxConcurrentDecodes,
+            ),
+        )
+    }
+
+    private fun configureImagePipeline(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+    ) {
+        val policy = AndroidImagePolicy(
+            maxEncodedBytes = arguments.requiredLong("maxEncodedBytes"),
+            maxSourcePixels = arguments.requiredLong("maxSourcePixels"),
+            maxOutputPixels = arguments.requiredLong("maxOutputPixels"),
+            maxPacketsBeforeFrame = arguments.requiredInt("maxPacketsBeforeFrame"),
+            decodeTimeoutMillis = arguments.requiredLong("decodeTimeoutMillis"),
+            maxQueuedDecodes = arguments.requiredInt("maxQueuedDecodes"),
+            maxConcurrentDecodes = arguments.requiredInt("maxConcurrentDecodes"),
+        )
+        validateImagePolicy(policy)
+        check(imageDecodeJobsByDartOperationId.isEmpty()) {
+            "cannot reconfigure the image pipeline while decode jobs are active"
+        }
+        val previous = imageDecodeExecutor
+        imagePolicy = policy
+        imageDecodeExecutor = newImageDecodeExecutor(policy)
+        previous.shutdown()
+        result.success(null)
+    }
+
+    private fun decodeHdrImage(arguments: Map<String, Any?>, result: MethodChannel.Result) {
+        val policy = imagePolicy
+        val dartOperationId = arguments.requiredLong("operationId")
+        val path = arguments["path"] as? String
+            ?: throw IllegalArgumentException("path is required")
+        val maxWidth = (arguments["cacheWidth"] as? Number)?.toInt() ?: 0
+        val maxHeight = (arguments["cacheHeight"] as? Number)?.toInt() ?: 0
+        require(dartOperationId > 0) { "operationId must be positive" }
+        require(maxWidth >= 0 && maxHeight >= 0) { "cache dimensions cannot be negative" }
+        val job = AndroidImageDecodeJob(
+            dartOperationId,
+            nextNativeImageOperationId(),
+            engineAttachmentGeneration,
+            result,
+        )
+        synchronized(imageOwnershipLock) {
+            if (hdrImageDecodeReserved || hdrImageHandles.isNotEmpty()) {
+                throw AndroidImageDecodeException(10, "another HDR image session is active")
+            }
+            hdrImageDecodeReserved = true
+            job.ownsHdrReservation.set(true)
+        }
+        if (imageDecodeJobsByDartOperationId.putIfAbsent(dartOperationId, job) != null) {
+            releaseHdrImageDecodeReservation(job)
+            error("operationId is already active")
+        }
+        try {
+            job.future = imageDecodeExecutor.submit {
+                job.started.set(true)
+                if (job.cancelled.get()) {
+                    imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+                    releaseHdrImageDecodeReservation(job)
+                    return@submit
+                }
+                imageDecodeInflight.incrementAndGet()
+                var handle = 0L
+                try {
+                    handle = ErikaNative.nativeDecodeImage(
+                        job.nativeOperationId,
+                        File(path).absolutePath,
+                        maxWidth,
+                        maxHeight,
+                        policy.maxEncodedBytes,
+                        policy.maxSourcePixels,
+                        policy.maxOutputPixels,
+                        policy.maxPacketsBeforeFrame,
+                        policy.decodeTimeoutMillis,
+                    )
+                    if (handle == 0L) throw AndroidImageDecodeException(
+                        ErikaNative.nativeLastImageErrorKind(), ErikaNative.nativeLastError(),
+                    )
+                    imageActiveHandles.incrementAndGet()
+                    val response = NativeJson.decodeResponse(ErikaNative.nativeImageMetadata(handle))
+                    if (!response.ok) throw AndroidImageDecodeException(
+                        ErikaNative.nativeLastImageErrorKind(), response.error.orEmpty(),
+                    )
+                    @Suppress("UNCHECKED_CAST")
+                    val metadata = response.value as Map<String, Any?>
+                    imageDecodeCount.incrementAndGet()
+                    if (job.cancelled.get()) return@submit
+                    synchronized(imageOwnershipLock) {
+                        if (!imageSubsystemClosing && attachedToEngine &&
+                            job.engineGeneration == engineAttachmentGeneration &&
+                            completeImageJob(job, metadata + mapOf("imageId" to handle))
+                        ) {
+                            hdrImageHandles.add(handle)
+                            handle = 0L
+                        }
+                    }
+                } catch (error: Throwable) {
+                    completeImageJob(job, error = error)
+                } finally {
+                    if (handle != 0L) {
+                        NativeJson.decodeResponse(ErikaNative.nativeDestroyImage(handle))
+                        imageActiveHandles.decrementAndGet()
+                    }
+                    imageDecodeInflight.decrementAndGet()
+                    imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+                    releaseHdrImageDecodeReservation(job)
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+            releaseHdrImageDecodeReservation(job)
+            completeImageJob(job, error = error)
+        }
+    }
+
+    private fun disposeHdrImage(arguments: Map<String, Any?>, result: MethodChannel.Result) {
+        val imageId = arguments.requiredLong("imageId")
+        val callGeneration = engineAttachmentGeneration
+        val cleanupExecutor = imageCleanupExecutor
+        val resultHandler = mainHandler
+        if (!hdrImageHandles.contains(imageId)) {
+            result.success(null)
+            return
+        }
+        if (!hdrImagesDisposing.add(imageId)) {
+            result.error("ERIKA_IMAGE_ERROR", "image cleanup is already active", mapOf("kind" to 10))
+            return
+        }
+        val destroy = {
+            ErikaNative.nativeDetachImageSurface(imageId)
+            val response = NativeJson.decodeResponse(ErikaNative.nativeDestroyImage(imageId))
+            if (response.ok && hdrImageHandles.remove(imageId)) imageActiveHandles.decrementAndGet()
+            hdrImagesDisposing.remove(imageId)
+            response
+        }
+        try {
+            cleanupExecutor.execute {
+                val response = destroy()
+                resultHandler.post {
+                    if (attachedToEngine && callGeneration == engineAttachmentGeneration) {
+                        if (response.ok) result.success(null)
+                        else result.error("ERIKA_IMAGE_ERROR", response.error, mapOf("kind" to 8))
+                    }
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            hdrImagesDisposing.remove(imageId)
+            result.error("ERIKA_IMAGE_ERROR", "image cleanup is closing", mapOf("kind" to 10))
+        }
+    }
+
+    internal fun attachHdrImageSurface(
+        imageId: Long,
+        surface: android.view.Surface,
+        width: Int,
+        height: Int,
+        extendedLinear: Boolean,
+        fallbackReason: Int,
+        directComposition: Boolean,
+        viewId: Int,
+        engineGeneration: Long,
+        surfaceGeneration: Long,
+        callback: (NativeResponse) -> Unit,
+    ) {
+        if (imageSubsystemClosing || engineGeneration != engineAttachmentGeneration) {
+            callback(NativeResponse(false, 3, "image subsystem is closing", null))
+            return
+        }
+        val surfaceToken = HdrImageSurfaceGeneration(engineGeneration, surfaceGeneration)
+        synchronized(imageOwnershipLock) {
+            hdrImageSurfaceGenerations[viewId] = surfaceToken
+        }
+        val surfaceExecutor = imageSurfaceExecutor
+        try { surfaceExecutor.execute {
+            if (imageSubsystemClosing || !attachedToEngine || engineGeneration != engineAttachmentGeneration) return@execute
+            val ownerToken = HdrImageViewOwner(viewId, engineGeneration, surfaceGeneration)
+            val owner = synchronized(imageOwnershipLock) {
+                if (hdrImageSurfaceGenerations[viewId] != surfaceToken) return@execute
+                hdrImageViewOwners.putIfAbsent(imageId, ownerToken)
+            }
+            if (owner != null && owner != ownerToken) {
+                mainHandler.post { callback(NativeResponse(false, 3, "image is attached to another view", null)) }
+                return@execute
+            }
+            val response = NativeJson.decodeResponse(
+                ErikaNative.nativeAttachImageSurface(
+                    imageId, surface, width, height, 1.0, extendedLinear, directComposition, 4f,
+                    fallbackReason,
+                ),
+            )
+            val stillCurrent = synchronized(imageOwnershipLock) {
+                hdrImageSurfaceGenerations[viewId] == surfaceToken &&
+                    hdrImageViewOwners[imageId] == ownerToken
+            }
+            val rendered = if (response.ok && stillCurrent) {
+                NativeJson.decodeResponse(ErikaNative.nativeRenderImageSurface(imageId))
+            } else response
+            mainHandler.post {
+                if (
+                    attachedToEngine &&
+                    engineGeneration == engineAttachmentGeneration &&
+                    hdrImageViewOwners[imageId] == ownerToken
+                ) callback(rendered)
+            }
+        } } catch (_: RejectedExecutionException) {
+            callback(NativeResponse(false, 3, "image surface queue is closed", null))
+        }
+    }
+
+    internal fun detachHdrImageSurface(
+        imageId: Long,
+        viewId: Int,
+        engineGeneration: Long,
+        surfaceGeneration: Long,
+        completion: (() -> Unit)? = null,
+    ) {
+        if (engineGeneration != engineAttachmentGeneration) { completion?.invoke(); return }
+        val surfaceToken = HdrImageSurfaceGeneration(engineGeneration, surfaceGeneration)
+        val shouldDetach = synchronized(imageOwnershipLock) {
+            hdrImageSurfaceGenerations[viewId] = surfaceToken
+            val owner = hdrImageViewOwners[imageId]
+            if (
+                owner != null &&
+                owner.viewId == viewId &&
+                owner.engineGeneration == engineGeneration &&
+                owner.surfaceGeneration < surfaceGeneration
+            ) {
+                hdrImageViewOwners.remove(imageId, owner)
+            } else {
+                false
+            }
+        }
+        if (!::imageSurfaceExecutor.isInitialized) {
+            completion?.invoke()
+            return
+        }
+        val surfaceExecutor = imageSurfaceExecutor
+        try {
+            surfaceExecutor.execute {
+            if (shouldDetach) {
+                NativeJson.decodeResponse(ErikaNative.nativeDetachImageSurface(imageId))
+            }
+            completion?.invoke()
+            }
+        } catch (_: RejectedExecutionException) {
+            completion?.invoke()
+        }
+    }
+
+    internal fun resizeHdrImageSurface(
+        imageId: Long,
+        viewId: Int,
+        engineGeneration: Long,
+        surfaceGeneration: Long,
+        width: Int,
+        height: Int,
+    ) {
+        if (engineGeneration != engineAttachmentGeneration) return
+        if (!::imageSurfaceExecutor.isInitialized) return
+        val surfaceExecutor = imageSurfaceExecutor
+        try {
+            surfaceExecutor.execute {
+                val surfaceToken = HdrImageSurfaceGeneration(engineGeneration, surfaceGeneration)
+                val ownerToken = HdrImageViewOwner(viewId, engineGeneration, surfaceGeneration)
+                if (
+                    attachedToEngine &&
+                    engineGeneration == engineAttachmentGeneration &&
+                    hdrImageSurfaceGenerations[viewId] == surfaceToken &&
+                    hdrImageViewOwners[imageId] == ownerToken
+                ) {
+                    val resized = NativeJson.decodeResponse(
+                        ErikaNative.nativeResizeImageSurface(imageId, width, height),
+                    )
+                    val rendered = if (resized.ok) {
+                        NativeJson.decodeResponse(ErikaNative.nativeRenderImageSurface(imageId))
+                    } else {
+                        resized
+                    }
+                    if (!rendered.ok) {
+                        Log.e(TAG, "Unable to resize HDR image $imageId: ${rendered.error}")
+                        mainHandler.post {
+                            if (
+                                attachedToEngine &&
+                                engineGeneration == engineAttachmentGeneration &&
+                                hdrImageViewOwners[imageId] == ownerToken
+                            ) {
+                                reportHdrImageSurfaceEvent(
+                                    viewId,
+                                    imageId,
+                                    engineGeneration,
+                                    rendered,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: RejectedExecutionException) { }
+    }
+
+    internal fun registerHdrImageView(viewId: Int, generation: Long) {
+        if (attachedToEngine && generation == engineAttachmentGeneration) {
+            hdrImageViews[viewId] = generation
+            hdrImageSurfaceGenerations[viewId] = HdrImageSurfaceGeneration(generation, 0)
+        }
+    }
+    internal fun unregisterHdrImageView(viewId: Int, generation: Long) {
+        hdrImageViews.remove(viewId, generation)
+        hdrImageSurfaceGenerations.computeIfPresent(viewId) { _, token ->
+            if (token.engineGeneration == generation) null else token
+        }
+    }
+
+    internal fun reportHdrImageSurfaceEvent(
+        viewId: Int,
+        imageId: Long,
+        engineGeneration: Long,
+        response: NativeResponse,
+    ) {
+        if (
+            !attachedToEngine ||
+            engineGeneration != engineAttachmentGeneration ||
+            hdrImageViews[viewId] != engineGeneration
+        ) return
+        methodChannel.invokeMethod(
+            "imageSurfaceEvent",
+            mapOf(
+                "viewId" to viewId,
+                "imageId" to imageId,
+                "ok" to response.ok,
+                "error" to response.error,
+                "value" to response.value,
+            ),
+        )
+    }
+
+    private data class HdrImageViewOwner(
+        val viewId: Int,
+        val engineGeneration: Long,
+        val surfaceGeneration: Long,
+    )
+
+    private data class HdrImageSurfaceGeneration(
+        val engineGeneration: Long,
+        val surfaceGeneration: Long,
+    )
+
+    private fun decodeSdrTexture(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+    ) = decodeImageTexture(arguments, result, automaticHdr = false)
+
+    private fun decodeImage(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+    ) = decodeImageTexture(arguments, result, automaticHdr = true)
+
+    private fun decodeImageTexture(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+        automaticHdr: Boolean,
+    ) {
+        val policy = imagePolicy
+        val dartOperationId = arguments.requiredLong("operationId")
+        val path = arguments["path"] as? String
+            ?: throw IllegalArgumentException("path is required")
+        val maxWidth = (arguments["cacheWidth"] as? Number)?.toInt() ?: 0
+        val maxHeight = (arguments["cacheHeight"] as? Number)?.toInt() ?: 0
+        require(dartOperationId > 0) { "operationId must be positive" }
+        require(maxWidth >= 0 && maxHeight >= 0) { "cache dimensions cannot be negative" }
+        val job = AndroidImageDecodeJob(
+            dartOperationId,
+            nextNativeImageOperationId(),
+            engineAttachmentGeneration,
+            result,
+        )
+        check(imageDecodeJobsByDartOperationId.putIfAbsent(dartOperationId, job) == null) {
+            "image decode operation $dartOperationId is already active"
+        }
+        try {
+            job.future = imageDecodeExecutor.submit {
+                if (job.cancelled.get()) return@submit
+                imageDecodeInflight.incrementAndGet()
+                var handle = 0L
+                try {
+                    val file = File(path)
+                    if (!file.isFile) {
+                        throw AndroidImageDecodeException(
+                            IMAGE_ERROR_SOURCE,
+                            "cached image file does not exist",
+                        )
+                    }
+                    if (file.length() > policy.maxEncodedBytes) {
+                        throw AndroidImageDecodeException(
+                            IMAGE_ERROR_RESOURCE_LIMIT,
+                            "encoded image exceeds the ${policy.maxEncodedBytes}-byte limit",
+                        )
+                    }
+                    if (job.cancelled.get()) return@submit
+                    handle = ErikaNative.nativeDecodeImage(
+                        job.nativeOperationId,
+                        file.absolutePath,
+                        maxWidth,
+                        maxHeight,
+                        policy.maxEncodedBytes,
+                        policy.maxSourcePixels,
+                        policy.maxOutputPixels,
+                        policy.maxPacketsBeforeFrame,
+                        policy.decodeTimeoutMillis,
+                    )
+                    if (handle == 0L) {
+                        throw AndroidImageDecodeException(
+                            ErikaNative.nativeLastImageErrorKind(),
+                            ErikaNative.nativeLastError(),
+                        )
+                    }
+                    imageActiveHandles.incrementAndGet()
+                    if (job.cancelled.get()) return@submit
+                    val metadataResponse = NativeJson.decodeResponse(
+                        ErikaNative.nativeImageMetadata(handle),
+                    )
+                    if (!metadataResponse.ok) {
+                        throw AndroidImageDecodeException(
+                            ErikaNative.nativeLastImageErrorKind(),
+                            metadataResponse.error ?: "unable to read image metadata",
+                        )
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val metadata = metadataResponse.value as? Map<String, Any?>
+                        ?: throw IllegalStateException("native image metadata was not an object")
+                    val sourceWidth = (metadata["width"] as Number).toInt()
+                    val sourceHeight = (metadata["height"] as Number).toInt()
+                    val sourceDynamicRange = (metadata["sourceDynamicRange"] as? Number)?.toInt() ?: 0
+                    val hdrDisplaySupported = android.os.Build.VERSION.SDK_INT >= 24 &&
+                        activity?.display?.isHdr == true
+                    if (automaticHdr && sourceDynamicRange >= 2 && hdrDisplaySupported) {
+                        val deliveredAsHdr = synchronized(imageOwnershipLock) {
+                            if (hdrImageDecodeReserved || hdrImageHandles.isNotEmpty() ||
+                                imageSubsystemClosing || !attachedToEngine ||
+                                job.engineGeneration != engineAttachmentGeneration
+                            ) {
+                                false
+                            } else if (completeImageJob(
+                                    job,
+                                    metadata + mapOf(
+                                        "presentation" to "hdr",
+                                        "imageId" to handle,
+                                    ),
+                                )
+                            ) {
+                                hdrImageHandles.add(handle)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        if (deliveredAsHdr) {
+                            imageDecodeCount.incrementAndGet()
+                            handle = 0L
+                            return@submit
+                        }
+                    }
+                    val extent = boundedImageExtent(
+                        sourceWidth,
+                        sourceHeight,
+                        maxWidth,
+                        maxHeight,
+                    )
+                    if (extent.first.toLong() * extent.second.toLong() > policy.maxOutputPixels) {
+                        throw AndroidImageDecodeException(
+                            IMAGE_ERROR_RESOURCE_LIMIT,
+                            "decoded image exceeds the ${policy.maxOutputPixels}-pixel output limit",
+                        )
+                    }
+                    val texture = createSdrImageTexture(
+                        handle,
+                        extent.first,
+                        extent.second,
+                        job.engineGeneration,
+                    )
+                    handle = 0L
+                    if (job.cancelled.get()) {
+                        disposeSdrImageTexture(texture)
+                        return@submit
+                    }
+                    imageDecodeCount.incrementAndGet()
+                    val delivered = completeImageJob(
+                        job,
+                        value = metadata + mapOf(
+                            "presentation" to "sdr",
+                            "sourceWidth" to sourceWidth,
+                            "sourceHeight" to sourceHeight,
+                            "width" to extent.first,
+                            "height" to extent.second,
+                            "textureId" to texture.textureId,
+                        ),
+                    )
+                    if (!delivered) disposeSdrImageTexture(texture)
+                } catch (error: Throwable) {
+                    completeImageJob(job, error = error)
+                } finally {
+                    if (handle != 0L) {
+                        NativeJson.decodeResponse(ErikaNative.nativeDestroyImage(handle))
+                        imageActiveHandles.decrementAndGet()
+                    }
+                    imageDecodeInflight.decrementAndGet()
+                    imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+                }
+            }
+        } catch (error: RejectedExecutionException) {
+            imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+            completeImageJob(job, error = error)
+        }
+    }
+
+    private fun createSdrImageTexture(
+        handle: Long,
+        width: Int,
+        height: Int,
+        engineGeneration: Long,
+    ): AndroidSdrImageTexture {
+        val ready = CountDownLatch(1)
+        val registrationLock = Any()
+        var created: AndroidSdrImageTexture? = null
+        var creationError: Throwable? = null
+        var registrationClosed = false
+        mainHandler.post {
+            synchronized(registrationLock) {
+                if (registrationClosed) {
+                    ready.countDown()
+                    return@post
+                }
+                try {
+                    check(attachedToEngine && !imageSubsystemClosing &&
+                        engineGeneration == engineAttachmentGeneration) {
+                        "image subsystem is closing"
+                    }
+                    val producer = textureRegistry.createSurfaceProducer()
+                    producer.setSize(width, height)
+                    val texture = AndroidSdrImageTexture(
+                        this,
+                        producer,
+                        handle,
+                        width,
+                        height,
+                        engineGeneration,
+                    )
+                    sdrImageTextures[texture.textureId] = texture
+                    created = texture
+                } catch (error: Throwable) {
+                    creationError = error
+                } finally {
+                    registrationClosed = true
+                    ready.countDown()
+                }
+            }
+        }
+        if (!ready.await(2, TimeUnit.SECONDS)) {
+            val timedOut = synchronized(registrationLock) {
+                if (created == null && creationError == null) {
+                    registrationClosed = true
+                    true
+                } else {
+                    false
+                }
+            }
+            if (timedOut) {
+                throw AndroidImageDecodeException(
+                    IMAGE_ERROR_BUSY,
+                    "timed out registering the Flutter image texture",
+                )
+            }
+        }
+        creationError?.let { throw it }
+        val texture = created ?: throw AndroidImageDecodeException(
+            IMAGE_ERROR_INTERNAL,
+            "Flutter image texture registration failed",
+        )
+        try {
+            attachAndRenderSdrImageTexture(texture)
+            mainHandler.post {
+                if (!texture.disposed.get()) texture.producer.setCallback(texture)
+            }
+            return texture
+        } catch (error: Throwable) {
+            abandonSdrImageTextureRegistration(texture)
+            throw error
+        }
+    }
+
+    private fun attachAndRenderSdrImageTexture(texture: AndroidSdrImageTexture) {
+        if (texture.disposed.get() || imageSubsystemClosing ||
+            texture.engineGeneration != engineAttachmentGeneration) {
+            throw AndroidImageDecodeException(IMAGE_ERROR_CANCELLED, "image texture is stale")
+        }
+        if (!texture.surfaceAttached.get()) {
+            val attached = NativeJson.decodeResponse(
+                ErikaNative.nativeAttachImageSurface(
+                    texture.handle,
+                    texture.producer.surface,
+                    texture.width,
+                    texture.height,
+                    1.0,
+                    false,
+                    false,
+                    1f,
+                    0,
+                ),
+            )
+            if (!attached.ok) {
+                throw AndroidImageDecodeException(
+                    ErikaNative.nativeLastImageErrorKind(),
+                    attached.error ?: "unable to attach the SDR image texture",
+                )
+            }
+            texture.surfaceAttached.set(true)
+        }
+        val rendered = NativeJson.decodeResponse(
+            ErikaNative.nativeRenderImageSurface(texture.handle),
+        )
+        if (!rendered.ok) {
+            if (texture.surfaceAttached.compareAndSet(true, false)) {
+                ErikaNative.nativeDetachImageSurface(texture.handle)
+            }
+            throw AndroidImageDecodeException(
+                ErikaNative.nativeLastImageErrorKind(),
+                rendered.error ?: "unable to render the SDR image texture",
+            )
+        }
+    }
+
+    internal fun renderSdrImageTexture(texture: AndroidSdrImageTexture) {
+        if (texture.disposed.get() || imageSubsystemClosing) return
+        try {
+            imageSurfaceExecutor.execute {
+                try {
+                    attachAndRenderSdrImageTexture(texture)
+                } catch (error: Throwable) {
+                    Log.e(TAG, "Unable to restore SDR texture ${texture.textureId}", error)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Engine teardown owns the texture from this point.
+        }
+    }
+
+    internal fun detachSdrImageTextureSurface(texture: AndroidSdrImageTexture) {
+        if (texture.disposed.get()) return
+        try {
+            imageSurfaceExecutor.execute {
+                if (texture.surfaceAttached.compareAndSet(true, false)) {
+                    ErikaNative.nativeDetachImageSurface(texture.handle)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Engine teardown owns the texture from this point.
+        }
+    }
+
+    private fun abandonSdrImageTextureRegistration(texture: AndroidSdrImageTexture) {
+        if (!texture.disposed.compareAndSet(false, true)) return
+        sdrImageTextures.remove(texture.textureId, texture)
+        if (texture.surfaceAttached.compareAndSet(true, false)) {
+            ErikaNative.nativeDetachImageSurface(texture.handle)
+        }
+        mainHandler.post {
+            texture.producer.setCallback(null)
+            texture.producer.release()
+        }
+    }
+
+    private fun disposeSdrTexture(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+    ) {
+        val textureId = arguments.requiredLong("textureId")
+        val texture = sdrImageTextures[textureId]
+        if (texture == null) {
+            result.success(null)
+            return
+        }
+        val callGeneration = engineAttachmentGeneration
+        disposeSdrImageTexture(texture) { response ->
+            if (!attachedToEngine || callGeneration != engineAttachmentGeneration) return@disposeSdrImageTexture
+            if (response.ok) result.success(null)
+            else result.error(
+                "ERIKA_IMAGE_ERROR",
+                response.error ?: "unable to dispose SDR image texture",
+                mapOf("kind" to IMAGE_ERROR_RENDERER),
+            )
+        }
+    }
+
+    private fun disposeSdrImageTexture(
+        texture: AndroidSdrImageTexture,
+        completion: ((NativeResponse) -> Unit)? = null,
+    ) {
+        if (!texture.disposed.compareAndSet(false, true)) {
+            completion?.invoke(NativeResponse(true, 0, null, null))
+            return
+        }
+        sdrImageTextures.remove(texture.textureId, texture)
+        mainHandler.post { texture.producer.setCallback(null) }
+        try {
+            imageSurfaceExecutor.execute {
+                if (texture.surfaceAttached.compareAndSet(true, false)) {
+                    ErikaNative.nativeDetachImageSurface(texture.handle)
+                }
+                val response = NativeJson.decodeResponse(
+                    ErikaNative.nativeDestroyImage(texture.handle),
+                )
+                if (response.ok) imageActiveHandles.decrementAndGet()
+                mainHandler.post {
+                    texture.producer.release()
+                    completion?.invoke(response)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            mainHandler.post {
+                texture.producer.release()
+                completion?.invoke(
+                    NativeResponse(false, IMAGE_ERROR_BUSY, "image cleanup is closing", null),
+                )
+            }
+        }
+    }
+
+    private fun cancelImageDecode(
+        arguments: Map<String, Any?>,
+        result: MethodChannel.Result,
+    ) {
+        val dartOperationId = arguments.requiredLong("operationId")
+        imageDecodeJobsByDartOperationId[dartOperationId]?.let { job ->
+            job.cancelled.set(true)
+            ErikaNative.nativeCancelImageDecode(job.nativeOperationId)
+            val future = job.future
+            if (future is Runnable && imageDecodeExecutor.remove(future)) {
+                imageQueuedCancelled.incrementAndGet()
+                releaseHdrImageDecodeReservation(job)
+            }
+            job.future?.cancel(true)
+            imageDecodeExecutor.purge()
+            completeImageJob(job, error = CancellationException("image decode was cancelled"))
+            imageDecodeJobsByDartOperationId.remove(dartOperationId, job)
+        }
+        result.success(null)
+    }
+
+    private fun releaseHdrImageDecodeReservation(job: AndroidImageDecodeJob) {
+        if (!job.ownsHdrReservation.compareAndSet(true, false)) return
+        synchronized(imageOwnershipLock) {
+            hdrImageDecodeReserved = false
+        }
+    }
+
+    private fun getImageDiagnostics(result: MethodChannel.Result) {
+        result.success(
+            mapOf(
+                "queued" to if (::imageDecodeExecutor.isInitialized) {
+                    imageDecodeExecutor.queue.size
+                } else {
+                    0
+                },
+                "inflight" to imageDecodeInflight.get(),
+                "decodeCount" to imageDecodeCount.get(),
+                "queuedCancelled" to imageQueuedCancelled.get(),
+                "nativeHandleCount" to imageActiveHandles.get(),
+                "sdrTextureCount" to sdrImageTextures.size,
+                "playerCount" to players.size,
+                "platformViewCount" to videoViews.size + hdrImageViews.size,
+            ),
+        )
+    }
+
+    private fun completeImageJob(
+        job: AndroidImageDecodeJob,
+        value: Map<String, Any?>? = null,
+        error: Throwable? = null,
+    ): Boolean {
+        if (!job.completed.compareAndSet(false, true)) return false
+        mainHandler.post {
+            if (!attachedToEngine || job.engineGeneration != engineAttachmentGeneration) {
+                return@post
+            }
+            if (error == null) {
+                job.result.success(value)
+            } else {
+                val kind = (error as? AndroidImageDecodeException)?.kind
+                    ?: if (error is CancellationException) {
+                        IMAGE_ERROR_CANCELLED
+                    } else if (error is RejectedExecutionException) {
+                        IMAGE_ERROR_BUSY
+                    } else {
+                        IMAGE_ERROR_INTERNAL
+                    }
+                job.result.error(
+                    "ERIKA_IMAGE_ERROR",
+                    error.message ?: "Erika image decode failed",
+                    mapOf("kind" to kind),
+                )
+            }
+        }
+        return true
     }
 
     internal fun registerVideoView(view: ErikaAndroidVideoView) {
@@ -1375,6 +2380,7 @@ class ErikaFlutterPlugin :
 
     private fun attachToActivity(binding: ActivityPluginBinding) {
         detachFromActivity()
+        activity = binding.activity
         val lifecycle = try {
             FlutterLifecycleAdapter.getActivityLifecycle(binding)
         } catch (error: Throwable) {
@@ -1404,6 +2410,7 @@ class ErikaFlutterPlugin :
             Log.i(TAG, "activityLifecycleDetached state=${lifecycle.currentState} active=false")
         }
         activityLifecycle = null
+        activity = null
         setActivityActive(false)
     }
 
@@ -2848,6 +3855,29 @@ class ErikaFlutterPlugin :
             }
         }
 
+    private fun newImageDecodeExecutor(policy: AndroidImagePolicy): ThreadPoolExecutor =
+        ThreadPoolExecutor(
+            policy.maxConcurrentDecodes,
+            policy.maxConcurrentDecodes,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(policy.maxQueuedDecodes),
+            { runnable ->
+                Thread(runnable, "erika-image-decode").apply { isDaemon = true }
+            },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
+
+    private fun validateImagePolicy(policy: AndroidImagePolicy) {
+        require(policy.maxEncodedBytes in 1..HARD_MAX_IMAGE_ENCODED_BYTES)
+        require(policy.maxSourcePixels in 1..HARD_MAX_IMAGE_SOURCE_PIXELS)
+        require(policy.maxOutputPixels in 1..HARD_MAX_IMAGE_OUTPUT_PIXELS)
+        require(policy.maxPacketsBeforeFrame in 1..HARD_MAX_IMAGE_PACKETS_BEFORE_FRAME)
+        require(policy.decodeTimeoutMillis in 1..HARD_MAX_IMAGE_DECODE_TIMEOUT_MILLIS)
+        require(policy.maxQueuedDecodes in 1..HARD_MAX_IMAGE_QUEUE_DEPTH)
+        require(policy.maxConcurrentDecodes in 1..HARD_MAX_IMAGE_CONCURRENT_DECODES)
+    }
+
     private fun scheduleContentSpoolStartupScavenge(): Future<*>? = try {
         contentPreparationExecutor.submit {
             val startedAt = SystemClock.elapsedRealtime()
@@ -3012,6 +4042,7 @@ class ErikaFlutterPlugin :
         private const val EVENT_CHANNEL = "erika_flutter/events"
         private const val VIDEO_VIEW_TYPE = "erika_flutter/video_view"
         private const val HDR_VIDEO_VIEW_TYPE = "erika_flutter/hdr_video_view"
+        private const val HDR_IMAGE_VIEW_TYPE = "erika_flutter/hdr_image_view"
         private const val MAX_EVENTS_PER_POLL = 256
         private const val EVENT_OVERFLOW_LOG_INTERVAL = 256L
         private const val NO_EVENT_STATUS = 5
@@ -3023,7 +4054,42 @@ class ErikaFlutterPlugin :
         private const val ERROR_STATE = 7
         private const val NO_OWNED_FD = -1
         private const val CONTENT_PREPARATION_THREADS = 2
+        private const val HARD_MAX_IMAGE_QUEUE_DEPTH = 64
+        private const val HARD_MAX_IMAGE_CONCURRENT_DECODES = 4
+        private const val HARD_MAX_IMAGE_ENCODED_BYTES = 128L * 1024L * 1024L
+        private const val HARD_MAX_IMAGE_SOURCE_PIXELS = 32L * 1024L * 1024L
+        private const val HARD_MAX_IMAGE_OUTPUT_PIXELS = 32L * 1024L * 1024L
+        private const val HARD_MAX_IMAGE_PACKETS_BEFORE_FRAME = 4_096
+        private const val HARD_MAX_IMAGE_DECODE_TIMEOUT_MILLIS = 120_000L
+        private val DEFAULT_IMAGE_POLICY = AndroidImagePolicy(
+            maxEncodedBytes = HARD_MAX_IMAGE_ENCODED_BYTES,
+            maxSourcePixels = HARD_MAX_IMAGE_SOURCE_PIXELS,
+            maxOutputPixels = HARD_MAX_IMAGE_OUTPUT_PIXELS,
+            maxPacketsBeforeFrame = 256,
+            decodeTimeoutMillis = 15_000L,
+            maxQueuedDecodes = 8,
+            maxConcurrentDecodes = 1,
+        )
+        private const val IMAGE_ERROR_SOURCE = 4
+        private const val IMAGE_ERROR_CANCELLED = 6
+        private const val IMAGE_ERROR_RESOURCE_LIMIT = 7
+        private const val IMAGE_ERROR_RENDERER = 8
+        private const val IMAGE_ERROR_BUSY = 10
+        private const val IMAGE_ERROR_INTERNAL = 9
         private val CONTENT_PREPARATION_THREAD_IDS = AtomicInteger(1)
+        private val NEXT_NATIVE_IMAGE_OPERATION_ID = AtomicLong(1L)
+
+        private fun nextNativeImageOperationId(): Long {
+            while (true) {
+                val candidate = NEXT_NATIVE_IMAGE_OPERATION_ID.get()
+                check(candidate in 1 until Long.MAX_VALUE) {
+                    "native image operation id space is exhausted"
+                }
+                if (NEXT_NATIVE_IMAGE_OPERATION_ID.compareAndSet(candidate, candidate + 1L)) {
+                    return candidate
+                }
+            }
+        }
 
         private val URI_METHODS = setOf(
             "open",

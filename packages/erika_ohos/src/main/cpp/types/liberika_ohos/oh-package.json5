@@ -1,0 +1,5 @@
+{
+  "name": "liberika_ohos.so",
+  "version": "0.2.0",
+  "types": "./Index.d.ts"
+}

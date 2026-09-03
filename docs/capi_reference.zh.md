@@ -13,14 +13,15 @@ ABI 是所有非 Rust 宿主（C、C++、Swift、Dart FFI、Win32……）的唯
 
 > 英文版：[capi_reference.md](capi_reference.md)。
 
-## 两个 handle 族
+## 三个 API 族
 
-Erika 暴露两个相互独立的入口，每个集成选其一。
+Erika 暴露三个相互独立的入口；每项媒体操作按用途选择对应的族。
 
 | Handle | 模型 | 谁渲染 | 适用 |
 |--------|------|--------|------|
 | `ErikaHandle` | **拉取（Pull）** | 宿主 | 你拥有渲染循环、自己拉取解码帧 / 驱动自己的合成器。 |
 | `ErikaPresenterHandle` | **推送（Push）** | Erika | 你把一个原生 surface 交给 Erika，每个显示帧调一次 `render_tick`。Erika 负责解码、时序、音频、overlay 和呈现。 |
+| `ErikaImageHandle` | **单帧解码** | Erika / 宿主 surface | 将一张静态 AVIF 输出为可缓存的 SDR RGBA 或原生 SDR/HDR surface，不创建播放器、音频和时间轴。 |
 
 `ErikaPresenterHandle` 是推荐路径，也是 Flutter 插件和原生 demo 所用的。它在
 **macOS、iOS、tvOS、Windows、Android、HarmonyOS** 上编译。surface attach 按平台不同：
@@ -29,7 +30,8 @@ HarmonyOS Flutter bridge 因 ArkTS 平台通道本身传递序列化结构化值
 辅助入口。其它不支持的平台上 `erika_presenter_create` 可能仍导出但返回 `NULL`；请同时按平台
 守卫 presenter 用法，并检查 create 是否成功。
 
-两个族不共享状态；一个进程可同时使用两者，但单个媒体会话只活在一个 handle 里。
+各族不共享媒体状态；一个进程可同时使用它们，但单个播放会话或静态解码结果只属于一个
+handle。
 
 ## 约定
 
@@ -113,6 +115,81 @@ free(buf);
 单个 handle **没有内部同步**。不要从多个线程并发调用同一个 handle；请自行串行化
 （或把 handle 限定在单线程内）。presenter 的 `render_tick` 应从拥有显示定时器 /
 surface 的线程驱动。不同 handle 在不同线程上互相独立。记住错误信息是线程局部的。
+
+静态图注册表会同步访问，以便 `erika_image_destroy` 等待正在执行的调用；但宿主仍应串行化
+同一 `ErikaImageHandle` 的操作，保证 attach/resize/render/detach 顺序。唯一有意允许的跨线程
+操作是 `erika_image_cancel_decode`：它可在工作线程执行
+`erika_image_decode_uri` 时从另一线程调用。
+
+## `ErikaImageHandle` —— 静态图单帧解码
+
+静态图 API 用软件解码器解码一帧 CPU 可读的 AV1/AVIF。它不会创建 `ErikaHandle`、
+`ErikaPresenterHandle`、音频会话、播放时间轴或硬件视频解码器。随后由 GPU 输出有界 SDR
+RGBA，或把同一帧保留在原生 SDR/HDR surface 上。
+
+### 入口与所有权
+
+| 函数 | 用途与所有权 |
+|------|--------------|
+| `erika_image_decode_uri` | 同步解码一个已缓存的本地源并返回非零、由调用方拥有的 `ErikaImageHandle`；开始工作前会清空 `out_handle`。 |
+| `erika_image_decode_uri_sized_with_policy` | 在尺寸约束之外接收调用方提供的 `ErikaImageDecodePolicy`，用于限制编码字节、源/输出像素、包处理量和超时；传 `NULL` 使用 Erika 默认值。 |
+| `erika_image_decode_uri_sized` | 新增的有界解码入口；保留源图元数据，但在 GPU 上传前约束所保留的 NV12/P010 平面，两个上限为零时保持旧版全尺寸行为。 |
+| `erika_image_cancel_decode` | 协作式取消进程内唯一的 `operation_id`；可从另一线程调用，也覆盖刚好早于 decode 开始到达的取消。 |
+| `erika_image_last_error_kind` | 返回当前线程最近一次失败图片调用的 `ErikaImageErrorKind`；要和 `erika_last_error_message` 一起在该线程下一次调用前读取。 |
+| `erika_image_get_metadata` | 从存活 handle 复制源尺寸、位深、色彩元数据、动态范围和解码后端到调用方存储。 |
+| `erika_image_render_sdr_rgba` | 消耗解码平面，并由 GPU 对完整图片 tone-map/gamut-map，得到有界、紧密排列的 RGBA8888；返回的分配归调用方。 |
+| `erika_image_rgba_free` | 释放 Erika 返回的 `ErikaImageRgba` 并把记录清零；传 `NULL` 或已清零记录是安全的，不得用 libc `free()`。 |
+| `erika_image_attach_wgpu_surface` | 挂接宿主拥有的原生 surface；首次挂接时消耗解码平面并移入 handle 内保留的单帧 GPU renderer。 |
+| `erika_image_resize_surface` | 更新已挂接 surface 的物理像素宽高和内容 scale，不会主动呈现。 |
+| `erika_image_render_surface` | 呈现一次保留帧，并填写反映实际输出的 `ErikaOutputStatus` 与 `ErikaDynamicRangeStatus`。 |
+| `erika_image_detach_surface` | 分离原生 surface，但保留已上传帧，因此同一 handle 可再挂接替换 surface。 |
+| `erika_image_destroy` | 关闭注册表 ID，等待活动调用，分离并释放 renderer 和解码图；同一非零旧 ID 重复销毁是 no-op。 |
+
+`erika_image_decode_uri` 当前仅接受已缓存的本地路径、file URI 或 owned-fd URI。传 `NULL`
+或内容为空/默认的 `ErikaOpenOptions`；HTTP header 和 read-ahead 选项会被拒绝。
+`operation_id` 必须非零，并在请求生命周期内保持进程唯一。decode 是阻塞的 C 调用，应放入
+有界工作队列而不是 UI 线程。取消是协作式的，decode 会在下一个取消边界返回
+`ErikaImageErrorKind_Cancelled`。decode 已经成功返回 handle 后，再取消旧 operation ID 不会
+销毁该 handle。
+
+源图和输出默认最多允许 32 Mi 像素。带 policy 的入口允许宿主选择更低限制，而 Erika
+保留 32 Mi 像素硬上限。请求的尺寸约束会降低保留平面和输出工作量；软件 decoder
+仍可能短暂地实例化已准入的完整源帧。
+
+图片失败同时使用普通 `ErikaStatus`、线程局部可读消息和更细的 `ErikaImageErrorKind`
+（`UnsupportedPlatform`、`UnsupportedFormat`、`Corrupt`、`Source`、`Network`、
+`Cancelled`、`ResourceLimit`、`Renderer`、`Internal`、`Busy`）。两个错误值都要在收到失败的
+同一线程读取。
+
+### 二选一的输出路径
+
+解码平面只会被消费一次。每个 handle 选择一种输出路径：
+
+- **SDR buffer：**调用 `erika_image_render_sdr_rgba`，复制或包装返回的 RGBA 字节，调用
+  `erika_image_rgba_free`，最后销毁 handle。`max_width` 和 `max_height` 是保持宽高比的像素
+  上限；零表示请求源尺寸，但仍受 Erika 输出资源上限约束。
+- **原生 surface：**依次 attach、render，按布局变化 resize/render，再 detach、destroy。
+  原生 window/layer 始终归宿主所有，必须存活到 detach 完成；宽高使用物理像素。
+
+surface 生命周期顺序：
+
+```c
+ErikaImageHandle image = 0;
+erika_image_decode_uri(operation_id, cached_path, NULL, &image);
+erika_image_get_metadata(image, &metadata);
+erika_image_attach_wgpu_surface(image, kind, raw_window, raw_display,
+                                width_px, height_px, scale, capabilities);
+erika_image_render_surface(image, &output, &dynamic_range);
+/* 布局变化时：先 resize，再次 render */
+erika_image_detach_surface(image);
+/* 此时宿主可释放原生 surface，或挂接一个替换 surface */
+erika_image_destroy(image);
+```
+
+挂接的 surface 无法提供 HDR 时，解码不会因此失败：Erika 会把同一完整源 tone-map 到该 SDR
+surface。只有成功 present 后的 `ErikaDynamicRangeStatus.hdr_output_confirmed` 才是 HDR 的
+权威信号；能力标志或 attach 成功本身都不能证明 HDR 输出。同一 handle 的 surface 调用必须
+有序。释放宿主 surface 或销毁图片前，应先把 platform view 移出组件树并等待 detach barrier。
 
 ## `ErikaHandle` —— 拉取模型
 

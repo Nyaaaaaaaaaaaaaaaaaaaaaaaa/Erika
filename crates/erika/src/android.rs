@@ -14,6 +14,13 @@ pub(crate) struct AndroidNativeWindow {
     raw: NonNull<c_void>,
 }
 
+// SAFETY: `AndroidNativeWindow` owns one acquired `ANativeWindow` reference.
+// Android permits that reference to move between threads, and its acquire /
+// release operations are thread-safe. The wrapper is intentionally not `Sync`:
+// Erika moves it with the owning renderer, whose surface operations remain
+// serialized and exclusively accessed by the renderer queue or mutex.
+unsafe impl Send for AndroidNativeWindow {}
+
 impl AndroidNativeWindow {
     /// Acquires one native reference to `raw`.
     ///

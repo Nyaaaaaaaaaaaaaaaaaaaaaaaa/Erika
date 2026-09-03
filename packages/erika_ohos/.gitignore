@@ -1,6 +1,8 @@
 .hvigor/
+.cxx/
 .ohpm/
 build/
+BuildProfile.ets
 node_modules/
 oh_modules/
 package-lock.json

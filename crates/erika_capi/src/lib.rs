@@ -1,12 +1,14 @@
 use std::any::Any;
-use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::ffi::{CStr, CString, c_char};
 use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, Location, catch_unwind};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "android")]
@@ -40,6 +42,7 @@ use erika::audio::AudioRecoveryState;
 use erika::danmaku::{
     DanmakuLayoutConfig, DanmakuShadowStyle, DanmakuTimeline, DanmakuTrackInfo, DanmakuTrackSource,
 };
+use erika::image::{DecodedImage, ImageDecodePolicy, ImageError};
 #[cfg(any(
     target_os = "macos",
     any(target_os = "ios", target_os = "tvos"),
@@ -81,7 +84,7 @@ use erika::renderer::pipeline::LumaUpscalerMode;
 use erika::subtitle::SubtitleStyleConfig;
 use erika::{
     FlutterTextureHandle, FlutterTextureKind, MediaRequest, MetalSurfaceHandle, PlatformSurface,
-    Player, PlayerConfig, PlayerEvent, PlayerState, RendererRuntimeStats,
+    Player, PlayerConfig, PlayerEvent, PlayerState, RendererRuntimeStats, SurfaceMetrics,
     SurfaceOutputCapabilities, TrackInfo, TrackKind, TrackSelection, TrackSource, TransferFunction,
     WgpuSurfaceHandle, WgpuSurfaceKind,
 };
@@ -118,6 +121,56 @@ pub struct ErikaOpenOptions {
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<String>> = RefCell::new(None);
+    static LAST_IMAGE_ERROR_KIND: Cell<ErikaImageErrorKind> = const { Cell::new(ErikaImageErrorKind::None) };
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ErikaImageErrorKind {
+    #[default]
+    None = 0,
+    UnsupportedPlatform = 1,
+    UnsupportedFormat = 2,
+    Corrupt = 3,
+    Source = 4,
+    Network = 5,
+    Cancelled = 6,
+    ResourceLimit = 7,
+    Renderer = 8,
+    Internal = 9,
+    Busy = 10,
+}
+
+fn clear_last_image_error_kind() {
+    LAST_IMAGE_ERROR_KIND.with(|kind| kind.set(ErikaImageErrorKind::None));
+}
+
+fn image_failure(error: ImageError) -> ErikaStatus {
+    let kind = match error {
+        ImageError::Source(_) => ErikaImageErrorKind::Source,
+        ImageError::Demux(_)
+        | ImageError::NoVisualTrack
+        | ImageError::Decode(_)
+        | ImageError::NoFrame => ErikaImageErrorKind::Corrupt,
+        ImageError::UnsupportedPixelFormat => ErikaImageErrorKind::UnsupportedFormat,
+        ImageError::Cancelled => ErikaImageErrorKind::Cancelled,
+        ImageError::WorkLimit(_) | ImageError::PixelLimit { .. } => {
+            ErikaImageErrorKind::ResourceLimit
+        }
+        ImageError::Renderer(_) => ErikaImageErrorKind::Renderer,
+    };
+    LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(kind));
+    player_error(error.to_string())
+}
+
+fn image_internal_failure(message: impl Into<String>) -> ErikaStatus {
+    LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(ErikaImageErrorKind::Internal));
+    player_error(message)
+}
+
+fn image_renderer_failure(message: impl Into<String>) -> ErikaStatus {
+    LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(ErikaImageErrorKind::Renderer));
+    player_error(message)
 }
 
 fn clear_last_error() {
@@ -598,6 +651,188 @@ pub struct ErikaDynamicRangeStatus {
     pub hdr_output_confirmed: bool,
 }
 
+/// Opaque process-local decode-once image id. Zero is always invalid. The id is
+/// resolved through a synchronized registry, so a stale caller cannot
+/// dereference freed memory while a surface callback is racing with destroy.
+pub type ErikaImageHandle = u64;
+
+struct ImageEntryState {
+    closing: bool,
+    active_calls: usize,
+}
+
+struct ImageEntry {
+    state: Mutex<ImageEntryState>,
+    idle: Condvar,
+    image: Mutex<DecodedImage>,
+}
+
+struct ImageCallGuard {
+    entry: Arc<ImageEntry>,
+}
+
+impl Drop for ImageCallGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.entry.state.lock() {
+            state.active_calls = state.active_calls.saturating_sub(1);
+            if state.active_calls == 0 {
+                self.entry.idle.notify_all();
+            }
+        }
+    }
+}
+
+fn image_registry() -> &'static Mutex<HashMap<ErikaImageHandle, Arc<ImageEntry>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<ErikaImageHandle, Arc<ImageEntry>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct ImageDecodeCancellations {
+    active: HashMap<u64, Arc<AtomicBool>>,
+    cancelled_before_start: HashSet<u64>,
+    tombstone_order: VecDeque<u64>,
+}
+
+fn image_decode_cancellations() -> &'static Mutex<ImageDecodeCancellations> {
+    static OPERATIONS: OnceLock<Mutex<ImageDecodeCancellations>> = OnceLock::new();
+    OPERATIONS.get_or_init(|| {
+        Mutex::new(ImageDecodeCancellations {
+            active: HashMap::new(),
+            cancelled_before_start: HashSet::new(),
+            tombstone_order: VecDeque::new(),
+        })
+    })
+}
+
+fn register_image(image: DecodedImage) -> Result<ErikaImageHandle, String> {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    if id == 0 {
+        return Err("static image id space exhausted".to_string());
+    }
+    let entry = Arc::new(ImageEntry {
+        state: Mutex::new(ImageEntryState {
+            closing: false,
+            active_calls: 0,
+        }),
+        idle: Condvar::new(),
+        image: Mutex::new(image),
+    });
+    image_registry()
+        .lock()
+        .map_err(|_| "static image registry lock was poisoned".to_string())?
+        .insert(id, entry);
+    Ok(id)
+}
+
+fn acquire_image_call(handle: ErikaImageHandle) -> Result<ImageCallGuard, String> {
+    if handle == 0 {
+        return Err("static image handle is invalid".to_string());
+    }
+    let entry = image_registry()
+        .lock()
+        .map_err(|_| "static image registry lock was poisoned".to_string())?
+        .get(&handle)
+        .cloned()
+        .ok_or_else(|| format!("static image handle {handle} is closed"))?;
+    {
+        let mut state = entry
+            .state
+            .lock()
+            .map_err(|_| "static image state lock was poisoned".to_string())?;
+        if state.closing {
+            return Err(format!("static image handle {handle} is closing"));
+        }
+        state.active_calls = state.active_calls.saturating_add(1);
+    }
+    Ok(ImageCallGuard { entry })
+}
+
+fn with_image<T>(
+    handle: ErikaImageHandle,
+    operation: impl FnOnce(&mut DecodedImage) -> Result<T, String>,
+) -> Result<T, String> {
+    let call = acquire_image_call(handle)?;
+    let result = call
+        .entry
+        .image
+        .lock()
+        .map_err(|_| "static image lock was poisoned".to_string())
+        .and_then(|mut image| operation(&mut image));
+    drop(call);
+    result
+}
+
+fn with_image_operation<T>(
+    handle: ErikaImageHandle,
+    operation: impl FnOnce(&mut DecodedImage) -> erika::image::Result<T>,
+) -> erika::image::Result<T> {
+    let call = acquire_image_call(handle).map_err(ImageError::Renderer)?;
+    let result = call
+        .entry
+        .image
+        .lock()
+        .map_err(|_| ImageError::Renderer("static image lock was poisoned".to_string()))
+        .and_then(|mut image| operation(&mut image));
+    drop(call);
+    result
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ErikaImageMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub bit_depth: u32,
+    pub primaries: u32,
+    pub transfer: u32,
+    pub matrix: u32,
+    pub color_range: u32,
+    pub source_dynamic_range: i32,
+    pub decode_backend: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErikaImageDecodePolicy {
+    pub max_input_bytes: u64,
+    pub max_source_pixels: u64,
+    pub max_output_pixels: u64,
+    pub max_packets_before_frame: u32,
+    pub decode_timeout_millis: u64,
+}
+
+impl Default for ErikaImageDecodePolicy {
+    fn default() -> Self {
+        let policy = ImageDecodePolicy::default();
+        Self {
+            max_input_bytes: policy.max_input_bytes,
+            max_source_pixels: policy.max_source_pixels,
+            max_output_pixels: policy.max_output_pixels,
+            max_packets_before_frame: u32::try_from(policy.max_packets_before_frame)
+                .unwrap_or(u32::MAX),
+            decode_timeout_millis: u64::try_from(policy.decode_timeout.as_millis())
+                .unwrap_or(u64::MAX),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ErikaImageRgbaLayout {
+    pub width: u32,
+    pub height: u32,
+    pub row_bytes: u32,
+    pub byte_len: usize,
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct ErikaImageRgba {
+    pub data: *mut u8,
+    pub layout: ErikaImageRgbaLayout,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ErikaPresenterResourceStatus {
@@ -809,6 +1044,378 @@ pub struct ErikaPresenterStats {
     pub hdr10_output_failures: u64,
     pub hdr10_output_active: bool,
     pub video_frame_backpressure_drops: u64,
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_decode_uri(
+    operation_id: u64,
+    uri: *const c_char,
+    options: *const ErikaOpenOptions,
+    out_handle: *mut ErikaImageHandle,
+) -> ErikaStatus {
+    unsafe { erika_image_decode_uri_sized(operation_id, uri, options, 0, 0, out_handle) }
+}
+
+/// Decode a static image while bounding the retained NV12/P010 upload planes.
+/// Zero bounds preserve the full-source behaviour of `erika_image_decode_uri`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_decode_uri_sized(
+    operation_id: u64,
+    uri: *const c_char,
+    options: *const ErikaOpenOptions,
+    max_width: u32,
+    max_height: u32,
+    out_handle: *mut ErikaImageHandle,
+) -> ErikaStatus {
+    unsafe {
+        erika_image_decode_uri_sized_with_policy(
+            operation_id,
+            uri,
+            options,
+            max_width,
+            max_height,
+            std::ptr::null(),
+            out_handle,
+        )
+    }
+}
+
+/// Decode a static image with caller-owned resource and work budgets.
+/// A null policy uses [`ImageDecodePolicy::default`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_decode_uri_sized_with_policy(
+    operation_id: u64,
+    uri: *const c_char,
+    options: *const ErikaOpenOptions,
+    max_width: u32,
+    max_height: u32,
+    policy: *const ErikaImageDecodePolicy,
+    out_handle: *mut ErikaImageHandle,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if out_handle.is_null() {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    unsafe { *out_handle = 0 };
+    if operation_id == 0 {
+        return finalize_status(image_internal_failure(
+            "static image operation id must be non-zero",
+        ));
+    }
+    let uri = match c_string(uri) {
+        Ok(uri) => uri,
+        Err(status) => return finalize_status(status),
+    };
+    let (headers, read_ahead) = match c_open_options(options) {
+        Ok(options) => options,
+        Err(status) => return finalize_status(status),
+    };
+    if !headers.is_empty() || read_ahead.is_some() {
+        return finalize_status(image_internal_failure(
+            "static image v1 accepts only cached local files; HTTP options are invalid",
+        ));
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    {
+        let mut operations = match image_decode_cancellations().lock() {
+            Ok(operations) => operations,
+            Err(_) => {
+                return finalize_status(image_internal_failure(
+                    "static image cancellation registry lock was poisoned",
+                ));
+            }
+        };
+        if operations.cancelled_before_start.remove(&operation_id) {
+            operations
+                .tombstone_order
+                .retain(|pending_id| *pending_id != operation_id);
+            LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(ErikaImageErrorKind::Cancelled));
+            return finalize_status(player_error("image decode was cancelled"));
+        }
+        if operations.active.contains_key(&operation_id) {
+            return finalize_status(image_internal_failure(format!(
+                "static image operation {operation_id} is already active"
+            )));
+        }
+        operations
+            .active
+            .insert(operation_id, Arc::clone(&cancelled));
+    }
+    struct OperationCleanup(u64);
+    impl Drop for OperationCleanup {
+        fn drop(&mut self) {
+            if let Ok(mut operations) = image_decode_cancellations().lock() {
+                operations.active.remove(&self.0);
+            }
+        }
+    }
+    let _cleanup = OperationCleanup(operation_id);
+    let request = MediaRequest::new(uri)
+        .with_http_headers(headers)
+        .map_http_read_ahead_bytes(read_ahead);
+    let policy = if policy.is_null() {
+        ImageDecodePolicy::default()
+    } else {
+        let policy = unsafe { *policy };
+        ImageDecodePolicy {
+            max_input_bytes: policy.max_input_bytes,
+            max_source_pixels: policy.max_source_pixels,
+            max_output_pixels: policy.max_output_pixels,
+            max_packets_before_frame: policy.max_packets_before_frame as usize,
+            decode_timeout: Duration::from_millis(policy.decode_timeout_millis),
+        }
+    };
+    match DecodedImage::decode_with_cancel_and_max_extent_and_policy(
+        &request, &cancelled, max_width, max_height, policy,
+    ) {
+        Ok(image) if cancelled.load(Ordering::Acquire) => {
+            LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(ErikaImageErrorKind::Cancelled));
+            finalize_status(player_error("image decode was cancelled"))
+        }
+        Ok(image) => match register_image(image) {
+            Ok(handle) if cancelled.load(Ordering::Acquire) => {
+                let _ = erika_image_destroy(handle);
+                LAST_IMAGE_ERROR_KIND.with(|slot| slot.set(ErikaImageErrorKind::Cancelled));
+                finalize_status(player_error("image decode was cancelled"))
+            }
+            Ok(handle) => {
+                unsafe { *out_handle = handle };
+                finalize_status(ErikaStatus::Ok)
+            }
+            Err(error) => finalize_status(image_internal_failure(error)),
+        },
+        Err(error) => finalize_status(image_failure(error)),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn erika_image_cancel_decode(operation_id: u64) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if operation_id == 0 {
+        return finalize_status(player_error("static image operation id must be non-zero"));
+    }
+    let cancelled = match image_decode_cancellations().lock() {
+        Ok(mut operations) => {
+            let active = operations.active.get(&operation_id).cloned();
+            if active.is_none() && operations.cancelled_before_start.insert(operation_id) {
+                const MAX_EARLY_CANCELS: usize = 1024;
+                operations.tombstone_order.push_back(operation_id);
+                while operations.tombstone_order.len() > MAX_EARLY_CANCELS {
+                    if let Some(expired) = operations.tombstone_order.pop_front() {
+                        operations.cancelled_before_start.remove(&expired);
+                    }
+                }
+            }
+            active
+        }
+        Err(_) => {
+            return finalize_status(player_error(
+                "static image cancellation registry lock was poisoned",
+            ));
+        }
+    };
+    if let Some(cancelled) = cancelled {
+        cancelled.store(true, Ordering::Release);
+    }
+    finalize_status(ErikaStatus::Ok)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn erika_image_last_error_kind() -> ErikaImageErrorKind {
+    LAST_IMAGE_ERROR_KIND.with(Cell::get)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn erika_image_destroy(handle: ErikaImageHandle) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    let entry = match image_registry().lock() {
+        Ok(mut registry) => registry.remove(&handle),
+        Err(_) => {
+            return finalize_status(player_error("static image registry lock was poisoned"));
+        }
+    };
+    let Some(entry) = entry else {
+        return finalize_status(ErikaStatus::Ok);
+    };
+    let mut state = match entry.state.lock() {
+        Ok(state) => state,
+        Err(_) => return finalize_status(player_error("static image state lock was poisoned")),
+    };
+    state.closing = true;
+    while state.active_calls != 0 {
+        state = match entry.idle.wait(state) {
+            Ok(state) => state,
+            Err(_) => {
+                return finalize_status(player_error("static image state lock was poisoned"));
+            }
+        };
+    }
+    drop(state);
+    drop(entry);
+    finalize_status(ErikaStatus::Ok)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_get_metadata(
+    handle: ErikaImageHandle,
+    out_metadata: *mut ErikaImageMetadata,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 || out_metadata.is_null() {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    match with_image(handle, |image| Ok(image.metadata())) {
+        Ok(metadata) => {
+            unsafe { *out_metadata = image_metadata_to_c(metadata) };
+            finalize_status(ErikaStatus::Ok)
+        }
+        Err(error) => finalize_status(image_internal_failure(error)),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_render_sdr_rgba(
+    handle: ErikaImageHandle,
+    max_width: u32,
+    max_height: u32,
+    out_rgba: *mut ErikaImageRgba,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 || out_rgba.is_null() {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    unsafe { *out_rgba = ErikaImageRgba::default() };
+    match with_image_operation(handle, |image| image.render_sdr(max_width, max_height)) {
+        Ok(rendered) => {
+            let layout = ErikaImageRgbaLayout {
+                width: rendered.width,
+                height: rendered.height,
+                row_bytes: rendered.row_bytes,
+                byte_len: rendered.rgba.len(),
+            };
+            let mut bytes = rendered.rgba.into_boxed_slice();
+            let data = bytes.as_mut_ptr();
+            std::mem::forget(bytes);
+            unsafe { *out_rgba = ErikaImageRgba { data, layout } };
+            finalize_status(ErikaStatus::Ok)
+        }
+        Err(error) => finalize_status(image_failure(error)),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_rgba_free(image: *mut ErikaImageRgba) {
+    if image.is_null() {
+        return;
+    }
+    let image = unsafe { &mut *image };
+    if !image.data.is_null() && image.layout.byte_len > 0 {
+        let bytes = std::ptr::slice_from_raw_parts_mut(image.data, image.layout.byte_len);
+        unsafe { drop(Box::from_raw(bytes)) };
+    }
+    *image = ErikaImageRgba::default();
+}
+
+#[cfg(feature = "wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_attach_wgpu_surface(
+    handle: ErikaImageHandle,
+    kind: ErikaWgpuSurfaceKind,
+    raw_window: u64,
+    raw_display: u64,
+    width: u32,
+    height: u32,
+    scale: f64,
+    output_capabilities: ErikaSurfaceOutputCapabilities,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 || raw_window == 0 || width == 0 || height == 0 {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    let surface = PlatformSurface::Wgpu(
+        wgpu_surface_handle_from_c(kind, raw_window, raw_display, width, height, scale)
+            .with_output_capabilities(output_capabilities.into()),
+    );
+    match with_image(handle, |image| {
+        image
+            .validate_output_extent(width, height)
+            .map_err(|error| error.to_string())?;
+        image
+            .attach_surface(surface)
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(()) => finalize_status(ErikaStatus::Ok),
+        Err(error) => finalize_status(image_renderer_failure(error)),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_resize_surface(
+    handle: ErikaImageHandle,
+    width: u32,
+    height: u32,
+    scale: f64,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 || width == 0 || height == 0 {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    match with_image(handle, |image| {
+        image
+            .validate_output_extent(width, height)
+            .map_err(|error| error.to_string())?;
+        image
+            .resize_surface(SurfaceMetrics::new(width, height, scale))
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(()) => finalize_status(ErikaStatus::Ok),
+        Err(error) => finalize_status(image_renderer_failure(error)),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_render_surface(
+    handle: ErikaImageHandle,
+    out_status: *mut ErikaOutputStatus,
+    out_dynamic_range: *mut ErikaDynamicRangeStatus,
+) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 || out_status.is_null() || out_dynamic_range.is_null() {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    match with_image(handle, |image| {
+        image.render_surface().map_err(|error| error.to_string())
+    }) {
+        Ok(status) => {
+            unsafe {
+                *out_status = output_status_to_c(status);
+                *out_dynamic_range = dynamic_range_status_to_c(status);
+            }
+            finalize_status(ErikaStatus::Ok)
+        }
+        Err(error) => finalize_status(image_renderer_failure(error)),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn erika_image_detach_surface(handle: ErikaImageHandle) -> ErikaStatus {
+    clear_last_image_error_kind();
+    if handle == 0 {
+        return finalize_status(ErikaStatus::NullPointer);
+    }
+    match with_image(handle, |image| {
+        image.detach_surface().map_err(|error| error.to_string())
+    }) {
+        Ok(()) => finalize_status(ErikaStatus::Ok),
+        Err(error) => finalize_status(image_renderer_failure(error)),
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -4580,6 +5187,45 @@ fn transfer_to_c(transfer: TransferFunction) -> u32 {
         TransferFunction::Bt1886 => 2,
         TransferFunction::Pq => 3,
         TransferFunction::Hlg => 4,
+    }
+}
+
+fn image_metadata_to_c(metadata: erika::image::ImageMetadata) -> ErikaImageMetadata {
+    let primaries = match metadata.primaries {
+        erika::ColorPrimaries::Unknown => 0,
+        erika::ColorPrimaries::Bt709 => 1,
+        erika::ColorPrimaries::DisplayP3 => 2,
+        erika::ColorPrimaries::Bt2020 => 3,
+    };
+    let matrix = match metadata.matrix {
+        erika::renderer::pipeline::MatrixCoefficients::Unspecified => 0,
+        erika::renderer::pipeline::MatrixCoefficients::Identity => 1,
+        erika::renderer::pipeline::MatrixCoefficients::Bt601 => 2,
+        erika::renderer::pipeline::MatrixCoefficients::Bt709 => 3,
+        erika::renderer::pipeline::MatrixCoefficients::Bt2020NonConstantLuminance => 4,
+    };
+    let color_range = match metadata.range {
+        erika::renderer::pipeline::ColorRange::Unspecified => 0,
+        erika::renderer::pipeline::ColorRange::Limited => 1,
+        erika::renderer::pipeline::ColorRange::Full => 2,
+    };
+    let source_dynamic_range = match metadata.source_dynamic_range {
+        DynamicRange::Unknown => ErikaDynamicRange::Unknown as i32,
+        DynamicRange::Sdr => ErikaDynamicRange::Sdr as i32,
+        DynamicRange::Hdr10Pq => ErikaDynamicRange::Hdr10Pq as i32,
+        DynamicRange::Hlg => ErikaDynamicRange::Hlg as i32,
+        DynamicRange::UltraHdrGainMap => ErikaDynamicRange::UltraHdrGainMap as i32,
+    };
+    ErikaImageMetadata {
+        width: metadata.width,
+        height: metadata.height,
+        bit_depth: u32::from(metadata.bit_depth),
+        primaries,
+        transfer: transfer_to_c(metadata.transfer),
+        matrix,
+        color_range,
+        source_dynamic_range,
+        decode_backend: metadata.decode_backend as i32,
     }
 }
 

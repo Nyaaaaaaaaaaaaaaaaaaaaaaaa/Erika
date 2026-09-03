@@ -155,7 +155,20 @@ jobs:
           ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="aarch64-apple-ios" \
           cargo rustc --locked -p erika_capi --lib --release \
               --target aarch64-apple-ios \
-              --no-default-features --crate-type staticlib
+              --no-default-features --features wgpu --crate-type staticlib
+          for symbol in \
+            erika_image_attach_wgpu_surface erika_image_cancel_decode \
+            erika_image_decode_uri erika_image_decode_uri_sized \
+            erika_image_decode_uri_sized_with_policy \
+            erika_image_destroy \
+            erika_image_detach_surface erika_image_get_metadata \
+            erika_image_last_error_kind erika_image_render_sdr_rgba \
+            erika_image_render_surface erika_image_resize_surface \
+            erika_image_rgba_free
+          do
+            nm -gU target/aarch64-apple-ios/release/liberika_capi.a |
+              grep -q "_$symbol"
+          done
 
   tvos:
     name: tvOS simulator staticlib

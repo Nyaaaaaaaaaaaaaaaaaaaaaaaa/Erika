@@ -7,6 +7,7 @@ pub mod core;
 pub mod danmaku;
 pub mod debug_hud;
 pub mod ffmpeg;
+pub mod image;
 #[cfg(target_env = "ohos")]
 pub mod ohos;
 #[cfg(any(target_env = "ohos", test))]

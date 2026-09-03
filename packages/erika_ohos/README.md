@@ -107,6 +107,91 @@ snapshots. `audioOnlyTick()` remains API-compatible for an AV1 session's ancilla
 audio path; standalone audio-only input is rejected by this AV1/AVIF-specialized
 fork.
 
+## Static images
+
+Static AVIF/HEIF/JPEG decoding is separate from `ErikaPlayer`. It decodes one
+frame without creating playback state, a timeline, VSync, event polling, or an
+audio path. Version 0.2 accepts an application-cached local file only; keep
+network download, authentication, encoded-file caching, and same-key
+single-flight in the host app. `ErikaImageSource.cacheKey` is the host's stable
+cache identity; the low-level decoder does not retain a decoded PixelMap cache.
+`cacheWidth`/`cacheHeight` bound the retained NV12/P010 planes. Source and SDR
+output admission both support up to 32 Mi pixels. The software decoder can still
+transiently materialize the admitted source frame before repacking it.
+
+For an SDR list or thumbnail, request the actual display size so native decode
+and conversion stay within the bounded image queue and output limits:
+
+```ts
+import { ErikaImageDecoder, ErikaImageSource } from 'erika';
+
+const operation = ErikaImageDecoder.decodeSdr({
+  source: ErikaImageSource.file(cachePath, revisionKey),
+  cacheWidth: 720,
+});
+
+// operation.cancel() removes queued work or asks an active decode to stop.
+const image = await operation.promise;
+console.info(
+  `decoded ${image.width}x${image.height}, rowBytes=${image.rowBytes}`,
+);
+// image.rgba is RGBA8888 for the host's PixelMap/image cache.
+```
+
+HDR details retain one decoded native frame and attach it directly to an
+`XComponent` surface. One `ErikaHdrDecodedImage` has one surface owner at a
+time. `detachSurface()` must finish before the XComponent releases its surface,
+and `dispose()` waits for native detach/destruction before releasing the image.
+Await attach, resize, render, detach, and dispose in lifecycle order rather than
+issuing overlapping host calls:
+
+```ts
+import {
+  ErikaHdrDecodedImage,
+  ErikaImageDecoder,
+  ErikaImageSource,
+} from 'erika';
+
+let detail: ErikaHdrDecodedImage | undefined = await
+  ErikaImageDecoder.decodeHdr({
+    source: ErikaImageSource.file(cachePath, revisionKey),
+  }).promise;
+
+const status = await detail.attachSurface({
+  surfaceId: BigInt(surfaceId),
+  width: rect.surfaceWidth,
+  height: rect.surfaceHeight,
+  scale: 1.0,
+});
+
+// This is the only positive HDR signal. Capability flags merely report that
+// the native XComponent path exists.
+if (status.hdrOutputConfirmed) {
+  console.info('HDR frame was presented');
+}
+
+// onSurfaceChanged:
+await detail.resizeSurface(rect.surfaceWidth, rect.surfaceHeight);
+await detail.renderSurface();
+
+// onSurfaceDestroyed / page teardown:
+await detail.detachSurface();
+await detail.dispose();
+detail = undefined;
+```
+
+`ErikaImageDecoder.capabilities()` reports the route and hard resource limits;
+it does not claim that the current display is HDR. The current standalone image
+decoder backend is software. The native boundary permits one active HDR image
+reservation (including a queued/running HDR decode), so dispose the current
+detail before decoding another and inspect `diagnostics().hdrHandleCount` when
+profiling lifecycle behavior. `hdrOutputConfirmed` becomes true only after a
+successful native present. PQ is presented as PQ and HLG is converted by the
+renderer for the negotiated HDR output; failed or SDR output remains explicit
+in `ErikaImageOutputStatus`. The HarmonyOS static surface currently publishes a
+nominal 1000-nit mastering/MaxCLL envelope and 400-nit MaxFALL; per-source AVIF
+mastering metadata is not yet propagated to the window.
+
 ## HTTP options
 
 For HTTP(S) playback, `open` accepts per-request headers and a read-ahead

@@ -9,10 +9,15 @@
   },
   "repository": "https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika",
   "license": "MPL-2.0",
+  "dependencies": {
+    "liberika_ohos.so": "file:./src/main/cpp/types/liberika_ohos"
+  },
   "keywords": [
     "media",
     "video-player",
     "harmonyos-next",
-    "hdr"
+    "hdr",
+    "avif",
+    "static-image"
   ]
 }

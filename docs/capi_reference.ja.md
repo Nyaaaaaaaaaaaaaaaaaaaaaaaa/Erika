@@ -15,14 +15,16 @@
 
 > 英語版：[capi_reference.md](capi_reference.md)。
 
-## 2 つの handle ファミリー
+## 3 つの API ファミリー
 
-Erika は独立した 2 つのエントリーポイントを公開します。組み込みごとに一方を選びます。
+Erika は独立した 3 つのエントリーポイントを公開します。メディア操作ごとに用途に合う
+ファミリーを選びます。
 
 | Handle | モデル | 描画担当 | 用途 |
 |--------|--------|----------|------|
 | `ErikaHandle` | **プル** | ホスト | レンダーループを自分で持ち、デコード済みフレームを pull / 独自コンポジタを駆動する。 |
 | `ErikaPresenterHandle` | **プッシュ** | Erika | native surface を Erika に渡し、表示フレームごとに `render_tick` を 1 回呼ぶ。Erika が decode・timing・audio・overlay・presentation を所有する。 |
+| `ErikaImageHandle` | **1 フレーム decode** | Erika / ホスト surface | player・audio・timeline を作らず、静止 AVIF を cache 可能な SDR RGBA または native SDR/HDR surface に出力する。 |
 
 `ErikaPresenterHandle` が推奨パスで、Flutter plugin と native demo もこれを使います。
 コンパイルされるのは **macOS / iOS / tvOS / Windows / Android / HarmonyOS**。surface attach は
@@ -32,8 +34,8 @@ wgpu/Vulkan surface を使います。HarmonyOS Flutter bridge は ArkTS platfor
 `erika_presenter_create` が export されても `NULL` を返す場合があるため、platform guard と
 create 成功の両方を確認してください。
 
-2 つのファミリーは状態を共有しません。1 プロセスで両方使えますが、1 つのメディア
-セッションは正確に 1 つの handle に属します。
+各ファミリーはメディア状態を共有しません。1 プロセスで併用できますが、1 つの再生
+セッションまたは decode 済み静止画は正確に 1 つの handle に属します。
 
 ## 規約
 
@@ -118,6 +120,88 @@ backing/DPI 係数（Retina の `2.0`、Windows のモニタ倍率など）で�
 ください。自分で直列化する（または handle を 1 スレッドに閉じ込める）こと。presenter の
 `render_tick` は表示タイマー / surface を持つスレッドから駆動します。異なる handle は
 異なるスレッドで独立です。エラーメッセージはスレッドローカルである点に注意。
+
+静止画 registry はアクセスを同期し、`erika_image_destroy` が実行中の呼び出しを待てる
+ようにしています。ただし attach/resize/render/detach の順序を保つため、ホストは同じ
+`ErikaImageHandle` の操作を直列化してください。意図的に別スレッドから呼べる操作は
+`erika_image_cancel_decode` です。worker thread 上の `erika_image_decode_uri` を
+キャンセルできます。
+
+## `ErikaImageHandle` —— 静止画の decode-once
+
+静止画 API は software decoder で CPU-readable な AV1/AVIF フレームを 1 枚 decode
+します。`ErikaHandle`、`ErikaPresenterHandle`、audio session、再生 timeline、hardware
+video decoder は作りません。その後 GPU で、上限付き SDR RGBA または保持された native
+SDR/HDR surface に出力します。
+
+### エントリーポイントと所有権
+
+| 関数 | 用途と所有権 |
+|------|--------------|
+| `erika_image_decode_uri` | cache 済み local source を同期 decode し、非 0 の caller-owned `ErikaImageHandle` を返す。処理開始前に `out_handle` をクリアする。 |
+| `erika_image_decode_uri_sized_with_policy` | size 制約に加えて caller-owned `ErikaImageDecodePolicy` を受け取り、encoded bytes、source/output pixels、packet work、timeout を制限する。`NULL` は Erika default。 |
+| `erika_image_decode_uri_sized` | 追加の bounded decode entry point。source metadata は保持しつつ、GPU upload 前の retained NV12/P010 planes を制限する。両上限が 0 なら従来の full-source behavior。 |
+| `erika_image_cancel_decode` | process 内で一意な `operation_id` を協調キャンセルする。別スレッドから呼べ、decode 開始直前に届くキャンセルも扱う。 |
+| `erika_image_last_error_kind` | 現在のスレッドで最後に失敗した image call の `ErikaImageErrorKind` を返す。同じスレッドの次の call より前に `erika_last_error_message` と一緒に読む。 |
+| `erika_image_get_metadata` | live handle から source size、bit depth、color metadata、dynamic range、decode backend を caller storage にコピーする。 |
+| `erika_image_render_sdr_rgba` | decode planes を消費し、画像全体を GPU tone-map/gamut-map して上限付き packed RGBA8888 を返す。allocation は caller-owned。 |
+| `erika_image_rgba_free` | Erika が返した `ErikaImageRgba` を解放して record を 0 にする。`NULL` または 0 済み record は安全。libc `free()` は使わない。 |
+| `erika_image_attach_wgpu_surface` | host-owned native surface を attach する。初回 attach で decode planes を消費し、handle 内の retained single-frame GPU renderer に移す。 |
+| `erika_image_resize_surface` | attached surface の physical pixel size と content scale を更新する。frame は present しない。 |
+| `erika_image_render_surface` | retained frame を 1 回 present し、実出力の `ErikaOutputStatus` と `ErikaDynamicRangeStatus` を埋める。 |
+| `erika_image_detach_surface` | native surface を detach するが uploaded frame は保持し、同じ handle を replacement surface に再 attach できる。 |
+| `erika_image_destroy` | registry id を閉じ、active call を待ち、renderer と decoded image を解放する。同じ非 0 の旧 id に対する再 destroy は no-op。 |
+
+`erika_image_decode_uri` が現在受け付けるのは cache 済み local path、file URI、owned-fd
+URI だけです。`ErikaOpenOptions` は `NULL` または empty/default を渡してください。HTTP
+header と read-ahead option は拒否されます。`operation_id` は非 0 で、request の生存期間中
+process 内で一意でなければなりません。decode は blocking C call なので UI thread ではなく
+上限付き worker queue で実行します。キャンセルは協調的で、次の cancellation boundary で
+`ErikaImageErrorKind_Cancelled` を返します。decode が handle を返した後に古い operation ID
+をキャンセルしても、その handle は破棄されません。
+
+source と output の admission は default で最大 32 Mi pixels です。policy-aware entry point
+では host がより小さい limit を選択でき、Erika は 32 Mi-pixel hard ceiling を維持します。
+requested size bounds は retained planes と output work を減らしますが、software decoder は
+admitted source frame 全体を一時的に materialize する場合があります。
+
+image failure は通常の `ErikaStatus` と thread-local message に加え、詳細な
+`ErikaImageErrorKind`（`UnsupportedPlatform`、`UnsupportedFormat`、`Corrupt`、`Source`、
+`Network`、`Cancelled`、`ResourceLimit`、`Renderer`、`Internal`、`Busy`）を使います。
+両方とも失敗を受けた同じスレッドで読んでください。
+
+### どちらか一方の出力パスを選ぶ
+
+decode planes は 1 回だけ消費されます。handle ごとに次の一方を選びます。
+
+- **SDR buffer:** `erika_image_render_sdr_rgba` を呼び、返された RGBA bytes を copy/wrap
+  し、`erika_image_rgba_free`、最後に destroy する。`max_width` と `max_height` は aspect
+  ratio を保つ pixel 上限。0 は source dimension を要求するが Erika の resource limit は残る。
+- **Native surface:** attach、render、layout 変更時の resize/render、detach、destroy の順。
+  native window/layer は host-owned で、detach 完了まで生存させる。width/height は physical
+  pixel。
+
+surface lifecycle の順序：
+
+```c
+ErikaImageHandle image = 0;
+erika_image_decode_uri(operation_id, cached_path, NULL, &image);
+erika_image_get_metadata(image, &metadata);
+erika_image_attach_wgpu_surface(image, kind, raw_window, raw_display,
+                                width_px, height_px, scale, capabilities);
+erika_image_render_surface(image, &output, &dynamic_range);
+/* layout 変更時：resize の後にもう一度 render */
+erika_image_detach_surface(image);
+/* host はここで native surface を解放、または replacement を attach できる */
+erika_image_destroy(image);
+```
+
+attached surface が HDR を提供できなくても decode は失敗しません。Erika は同じ完全な source
+をその SDR surface 向けに tone-map します。HDR の authoritative signal は present 成功後の
+`ErikaDynamicRangeStatus.hdr_output_confirmed` だけです。capability flag や attach 成功だけでは
+HDR 出力を証明できません。同じ handle の surface call は順序を維持してください。host
+surface の解放または image destroy の前に platform view を tree から外し、detach barrier を
+待ちます。
 
 ## `ErikaHandle` —— プルモデル
 

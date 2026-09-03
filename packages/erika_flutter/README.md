@@ -282,7 +282,51 @@ capability and validates the coded size before creating the decoder by its
 reported codec name. It never selects the recommended software AVCodec: missing
 capability, unsupported dimensions, or any open/runtime failure falls back
 directly to dav1d. Surface output uses the NativeBuffer/Vulkan path; AVCodec
-buffer output and dav1d use CPU upload. Static AVIF follows the same policy.
+buffer output and dav1d use CPU upload. This policy applies to video playback.
+
+Static AVIF uses a separate decode-once path: one AV1 frame is decoded with the
+software decoder into CPU-readable planes, without creating a player or
+querying AVCodec. SDR output is registered as a Flutter external texture;
+Android renders directly to a `SurfaceProducer`, while iOS keeps the bounded
+pixel buffer on the native side. Whole-image RGBA bytes never cross the Flutter
+method channel. HDR/EDR output presents the retained frame on the platform HDR
+surface. Hardware video-decoder diagnostics therefore do not describe static
+AVIF decoding.
+
+The public image API owns capability checks, decode cancellation, HDR/SDR
+selection, native handles, textures, and release ordering. It reads the decoded
+file metadata: HDR is shown automatically when the device supports an HDR
+surface, otherwise the same source is rendered as SDR. There is no HDR switch
+for the caller.
+
+```dart
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ErikaImagePipeline.configure(
+    const ErikaImagePolicy(
+      maxSourcePixels: 32 * 1024 * 1024,
+      maxOutputPixels: 32 * 1024 * 1024,
+      maxConcurrentDecodes: 2,
+      maxIdleTextureBytes: 32 * 1024 * 1024,
+    ),
+  );
+  runApp(const App());
+}
+
+ErikaImage.file(
+  cachedPath,
+  cacheKey: stableResourceKey,
+  fit: BoxFit.cover,
+  maxDecodeExtent: 2048,
+)
+```
+
+`ErikaImagePolicy` makes encoded/source/output limits, parser work, timeout,
+queueing, concurrency, texture-cache budget, background trimming, and physical
+decode buckets application-owned policy. The native hard ceiling for source and
+output size is 32 Mi pixels. This is an upper limit, not a request to allocate a
+32 Mi-pixel texture: `ErikaImage.file` normally decodes to its physical layout
+size, additionally bounded by `maxDecodeExtent` when supplied.
 
 ## HTTP Headers
 
