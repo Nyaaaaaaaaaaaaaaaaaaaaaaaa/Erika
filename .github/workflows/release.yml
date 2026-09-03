@@ -143,6 +143,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+          components: llvm-tools-preview
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
       - name: Cache native dependencies
@@ -156,6 +157,8 @@ jobs:
         # (which iOS does not use and which fails to resolve here) is skipped.
         run: |
           set -euo pipefail
+          llvm_nm="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-nm"
+          test -x "$llvm_nm"
           for ENTRY in \
             "aarch64-apple-ios|iphoneos|arm64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET}" \
             "aarch64-apple-ios-sim|iphonesimulator|arm64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET}-simulator" \
@@ -170,6 +173,7 @@ jobs:
             ERIKA_NATIVE_PROFILE="$PROFILE" ERIKA_NATIVE_TARGET="$T" \
             cargo rustc -p erika_capi --lib --release --target "$T" \
                 --no-default-features --features wgpu --crate-type staticlib
+            symbols="$("$llvm_nm" --defined-only --extern-only "target/$T/release/liberika_capi.a" | awk '{print $NF}')"
             for symbol in \
               erika_image_attach_wgpu_surface erika_image_cancel_decode \
               erika_image_decode_uri erika_image_decode_uri_sized \
@@ -180,7 +184,7 @@ jobs:
               erika_image_render_surface erika_image_resize_surface \
               erika_image_rgba_free
             do
-              nm -gU "target/$T/release/liberika_capi.a" | grep -q "_$symbol"
+              grep -Fxq "_$symbol" <<< "$symbols"
             done
           done
       - name: Assemble XCFramework
@@ -580,7 +584,8 @@ jobs:
           "$readelf" -h "$runtime" | grep -Eq 'Machine:.*AArch64'
           "$readelf" -d "$runtime" | grep -Eq '\(SONAME\).*liberika_capi\.so'
           "$readelf" -h "$arkts_bridge" | grep -Eq 'Machine:.*AArch64'
-          "$readelf" -S "$arkts_bridge" | grep -Fq '.init_array'
+          arkts_sections="$("$readelf" -S "$arkts_bridge")"
+          grep -Fq '.init_array' <<< "$arkts_sections"
           symbols="$("$nm" --dynamic --defined-only "$runtime" | awk '{print $NF}')"
           for symbol in \
             erika_presenter_invoke_json \
