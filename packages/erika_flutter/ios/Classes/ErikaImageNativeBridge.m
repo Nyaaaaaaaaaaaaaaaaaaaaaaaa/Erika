@@ -100,8 +100,8 @@ static NSDictionary<NSString *, id> *ErikaImageMetadataValue(
     rgba = [NSData data];
     erika_image_rgba_free(&image);
   } else {
-    rgba = [NSData
-        dataWithBytesNoCopy:image.data
+    rgba = [[NSData alloc]
+        initWithBytesNoCopy:image.data
                      length:image.layout.byte_len
                 deallocator:^(void *bytes, NSUInteger length) {
                   ErikaImageRgba owned = {0};
