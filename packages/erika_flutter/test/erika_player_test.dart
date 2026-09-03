@@ -131,7 +131,7 @@ void main() {
     }
   });
 
-  test('default player lets native choose output mode', () async {
+  test('default player requests source-aware automatic output', () async {
     final player = ErikaPlayer();
 
     expect(await player.ensureCreated(), 7);
@@ -140,7 +140,9 @@ void main() {
       (MethodCall call) => call.method == 'create',
     );
     expect(createCall.arguments, isA<Map<Object?, Object?>>());
-    expect(createCall.arguments as Map<Object?, Object?>, isEmpty);
+    expect(createCall.arguments, <String, Object?>{
+      'outputMode': ErikaOutputMode.auto.nativeValue,
+    });
 
     await player.dispose();
   });
@@ -159,6 +161,7 @@ void main() {
       (MethodCall call) => call.method == 'create',
     );
     expect(createCall.arguments, <String, Object?>{
+      'outputMode': ErikaOutputMode.auto.nativeValue,
       'allowBackgroundPlayback': true,
     });
 
