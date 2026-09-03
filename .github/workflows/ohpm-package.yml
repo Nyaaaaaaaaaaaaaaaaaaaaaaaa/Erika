@@ -132,8 +132,8 @@ jobs:
           test "$package_version" = "$ERIKA_NATIVE_VERSION"
           npm config set @ohos:registry https://repo.harmonyos.com/npm/
           npm install --no-save --package-lock=false \
-            @ohos/hvigor@5.19.8 \
-            @ohos/hvigor-ohos-plugin@5.19.8
+            @ohos/hvigor@6.0.6 \
+            @ohos/hvigor-ohos-plugin@6.0.6
           node node_modules/@ohos/hvigor/bin/hvigor.js --version
 
       - name: Build the HAR with Hvigor
