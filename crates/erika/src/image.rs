@@ -551,14 +551,12 @@ fn decode_first_frame(
                 decoder
                     .send_eof()
                     .map_err(|error| ImageError::Decode(error.to_string()))?;
-                loop {
-                    match decoder.receive_frame() {
-                        Ok(DecoderOutputFrame::Frame(frame)) => return Ok(frame),
-                        Ok(DecoderOutputFrame::EndOfStream) => return Err(ImageError::NoFrame),
-                        Ok(DecoderOutputFrame::NeedMoreInput) => return Err(ImageError::NoFrame),
-                        Err(error) if error.is_again() => return Err(ImageError::NoFrame),
-                        Err(error) => return Err(ImageError::Decode(error.to_string())),
-                    }
+                match decoder.receive_frame() {
+                    Ok(DecoderOutputFrame::Frame(frame)) => return Ok(frame),
+                    Ok(DecoderOutputFrame::EndOfStream) => return Err(ImageError::NoFrame),
+                    Ok(DecoderOutputFrame::NeedMoreInput) => return Err(ImageError::NoFrame),
+                    Err(error) if error.is_again() => return Err(ImageError::NoFrame),
+                    Err(error) => return Err(ImageError::Decode(error.to_string())),
                 }
             }
         }
