@@ -80,7 +80,7 @@ jobs:
         with:
           # setup-ohos-sdk mirror tag; the SDK reports HarmonyOS 6 / API 20.
           version: "6.0"
-          components: "native;ets;js;toolchains;previewer"
+          components: all
           fixup-path: true
           cache: true
 
