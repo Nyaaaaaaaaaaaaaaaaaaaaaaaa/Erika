@@ -152,6 +152,131 @@ void main() {
     expect(ErikaOutputMode.fromNativeValue(3), ErikaOutputMode.auto);
   });
 
+  test('preferred HDR resolves one platform output contract', () {
+    final android = ErikaOutputSurfacePlan.forPlatform(
+      ErikaOutputMode.preferHdr,
+      TargetPlatform.android,
+    );
+    expect(android.nativeMode, ErikaOutputMode.extendedLinear);
+    expect(android.requiresAndroidExtendedLinearSurface, isTrue);
+
+    final ios = ErikaOutputSurfacePlan.forPlatform(
+      ErikaOutputMode.preferHdr,
+      TargetPlatform.iOS,
+    );
+    expect(ios.nativeMode, ErikaOutputMode.appleEdr);
+    expect(ios.requiresAndroidExtendedLinearSurface, isFalse);
+
+    final linux = ErikaOutputSurfacePlan.forPlatform(
+      ErikaOutputMode.preferHdr,
+      TargetPlatform.linux,
+    );
+    expect(linux.nativeMode, ErikaOutputMode.auto);
+    expect(linux.requiresAndroidExtendedLinearSurface, isFalse);
+  });
+
+  test('preferred HDR is passed to Android native player as extended-linear',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final player = ErikaPlayer(outputMode: ErikaOutputMode.preferHdr);
+    try {
+      expect(await player.ensureCreated(), 7);
+
+      final createCall = playerCalls.singleWhere(
+        (MethodCall call) => call.method == 'create',
+      );
+      final arguments = createCall.arguments as Map<Object?, Object?>;
+      expect(
+        arguments['outputMode'],
+        ErikaOutputMode.extendedLinear.nativeValue,
+      );
+      expect(arguments['edrHeadroom'], 4.0);
+    } finally {
+      await player.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('HDR image presentation follows native output confirmation', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(playerChannel, (MethodCall call) async {
+      return switch (call.method) {
+        'getImageCapabilities' => <String, Object?>{
+          'sdrDecodeSupported': true,
+          'hdrSurfaceSupported': true,
+          'activeBackend': 'hardware',
+          'maxEncodedBytes': 128 * 1024 * 1024,
+          'maxSourcePixels': 32 * 1024 * 1024,
+          'maxOutputPixels': 32 * 1024 * 1024,
+          'maxConcurrentDecodes': 1,
+        },
+        'decodeImage' => <String, Object?>{
+          'presentation': 'hdr',
+          'imageId': 11,
+          'sourceWidth': 100,
+          'sourceHeight': 100,
+          'sourceDynamicRange': 2,
+        },
+        'disposeHdrImage' || 'cancelImageDecode' => null,
+        _ => null,
+      };
+    });
+    final platformViewCalls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
+      MethodCall call,
+    ) async {
+      platformViewCalls.add(call);
+      return null;
+    });
+    final presentations = <ErikaImagePresentation>[];
+
+    try {
+      await tester.pumpWidget(
+        _hdrImageHost(onPresentationChanged: presentations.add),
+      );
+      await _pumpHdrImageSurface(tester);
+
+      final createCall = platformViewCalls.singleWhere(
+        (MethodCall call) => call.method == 'create',
+      );
+      final createArguments = createCall.arguments as Map<Object?, Object?>;
+      expect(createArguments['viewType'], 'erika_flutter/hdr_image_view');
+      expect(presentations, isEmpty);
+
+      await _dispatchHdrImageSurfaceEvent(
+        messenger: messenger,
+        viewId: createArguments['id']! as int,
+        hdrOutputConfirmed: false,
+      );
+      await tester.pump();
+
+      expect(presentations, <ErikaImagePresentation>[
+        ErikaImagePresentation.sdr,
+      ]);
+
+      await _dispatchHdrImageSurfaceEvent(
+        messenger: messenger,
+        viewId: createArguments['id']! as int,
+        hdrOutputConfirmed: true,
+      );
+      await tester.pump();
+
+      expect(presentations, <ErikaImagePresentation>[
+        ErikaImagePresentation.sdr,
+        ErikaImagePresentation.hdr,
+      ]);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      debugDefaultTargetPlatformOverride = null;
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+    }
+  });
+
   test('background playback is opt-in at player creation', () async {
     final player = ErikaPlayer(allowBackgroundPlayback: true);
 
@@ -933,6 +1058,77 @@ void main() {
         final attachArguments = attachCall.arguments as Map<Object?, Object?>;
         expect(attachArguments['playerId'], 7);
         expect(attachArguments['viewId'], createArguments['id']);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        await player.dispose();
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform_views, null);
+      }
+    },
+  );
+
+  testWidgets(
+    'preferred-HDR Android view uses the matching Hybrid Composition SurfaceView',
+    (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final platformViewCalls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform_views, (
+        MethodCall call,
+      ) async {
+        platformViewCalls.add(call);
+        return null;
+      });
+      final player = ErikaPlayer(
+        outputMode: ErikaOutputMode.preferHdr,
+        edrHeadroom: 4.0,
+      );
+      try {
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: SizedBox(
+              width: 320,
+              height: 180,
+              child: ErikaVideoView(
+                player: player,
+                debugLabel: 'android-preferred-hdr-video',
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(PlatformViewLink), findsOneWidget);
+        expect(find.byType(AndroidView), findsNothing);
+        final createCall = platformViewCalls.singleWhere(
+          (MethodCall call) => call.method == 'create',
+        );
+        final createArguments = createCall.arguments as Map<Object?, Object?>;
+        expect(createArguments['viewType'], 'erika_flutter/hdr_video_view');
+        expect(createArguments['hybrid'], isTrue);
+        final encodedParams = createArguments['params'] as Uint8List;
+        final creationParams = const StandardMessageCodec().decodeMessage(
+          ByteData.sublistView(encodedParams),
+        ) as Map<Object?, Object?>;
+        expect(
+          creationParams['outputMode'],
+          ErikaOutputMode.extendedLinear.nativeValue,
+        );
+        expect(creationParams['requestedHdrHeadroom'], 4.0);
+        expect(creationParams['composition'], 'hybrid');
+
+        final playerCreateCall = playerCalls.singleWhere(
+          (MethodCall call) => call.method == 'create',
+        );
+        final playerCreateArguments =
+            playerCreateCall.arguments as Map<Object?, Object?>;
+        expect(
+          playerCreateArguments['outputMode'],
+          ErikaOutputMode.extendedLinear.nativeValue,
+        );
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pumpAndSettle();
@@ -1854,4 +2050,55 @@ void main() {
     expect(unknownEvent.kind, ErikaEventKind.systemMediaNavigationRequested);
     expect(unknownEvent.systemMediaCommand, isNull);
   });
+}
+
+Future<void> _pumpHdrImageSurface(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump();
+  await tester.pump();
+}
+
+Widget _hdrImageHost({
+  required ValueChanged<ErikaImagePresentation> onPresentationChanged,
+}) =>
+    MediaQuery(
+      data: const MediaQueryData(),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: SizedBox(
+          width: 100,
+          height: 100,
+          child: ErikaImage.file(
+            '/hdr-fallback.avif',
+            placeholder: const SizedBox.expand(),
+            onPresentationChanged: onPresentationChanged,
+          ),
+        ),
+      ),
+    );
+
+Future<void> _dispatchHdrImageSurfaceEvent({
+  required TestDefaultBinaryMessenger messenger,
+  required int viewId,
+  required bool hdrOutputConfirmed,
+}) async {
+  final response = Completer<void>();
+  messenger.handlePlatformMessage(
+    'erika_flutter/player',
+    const StandardMethodCodec().encodeMethodCall(
+      MethodCall('imageSurfaceEvent', <String, Object?>{
+        'viewId': viewId,
+        'imageId': 11,
+        'ok': true,
+        'value': <String, Object?>{
+          'hdrOutputConfirmed': hdrOutputConfirmed,
+          'activeDynamicRange': hdrOutputConfirmed ? 2 : 1,
+          'activeEncoding': hdrOutputConfirmed ? 2 : 0,
+          'fallbackReason': hdrOutputConfirmed ? 0 : 1,
+        },
+      }),
+    ),
+    (_) => response.complete(),
+  );
+  await response.future;
 }

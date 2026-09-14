@@ -260,26 +260,23 @@ await player.open(
 
 ## Output Mode
 
-`ErikaPlayer()` は Apple plugin に現在の screen と environment から SDR か Apple EDR を
-選ばせ、Android は SDR が default です。Dart から Apple EDR を強制するには：
+`ErikaOutputMode.preferHdr` は利用可能な最良の HDR 出力を求める cross-platform request
+です。Erika はこれを一度だけ解決し、native player の作成と Flutter video surface で同じ
+output contract を使います。Android は Hybrid Composition の FP16 extended-linear scRGB
+`SurfaceView`、Apple は Apple EDR になります。
 
 ```dart
 final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.appleEdr,
+  outputMode: ErikaOutputMode.preferHdr,
   edrHeadroom: 4.0,
 );
 ```
 
-`ErikaOutputMode.sdr` で SDR 出力を強制できます。
+`ErikaOutputMode.sdr` で SDR 出力を強制できます。platform-specific の `appleEdr` と
+`extendedLinear` は custom host との compatibility のため残りますが、通常の app は
+`auto`、`preferHdr`、`sdr` を使ってください。
 
 Android の high-headroom mode は FP16 **extended-linear scRGB** で、HDR10/PQ ではありません。
-
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.extendedLinear,
-  edrHeadroom: 4.0,
-);
-```
 
 `edrHeadroom` は content-headroom ceiling です。extended-linear player で省略すると Erika
 は default 4x content ceiling を使い、`SurfaceView` の desired headroom は `0`（system auto）

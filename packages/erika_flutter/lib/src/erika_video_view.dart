@@ -436,7 +436,7 @@ class _ErikaAndroidVideoViewState extends State<_ErikaAndroidVideoView> {
   int _surfaceGeneration = 0;
 
   bool _usesExtendedLinearSurface(ErikaPlayer player) =>
-      player.outputMode == ErikaOutputMode.extendedLinear;
+      player.outputSurfacePlan?.requiresAndroidExtendedLinearSurface ?? false;
 
   Object _surfaceConfigurationKey(ErikaPlayer player) {
     if (!_usesExtendedLinearSurface(player)) {
@@ -573,12 +573,14 @@ class _ErikaAndroidVideoViewState extends State<_ErikaAndroidVideoView> {
 
   @override
   Widget build(BuildContext context) {
-    final extendedLinear = _usesExtendedLinearSurface(widget.player);
+    final outputPlan = widget.player.outputSurfacePlan;
+    final extendedLinear =
+        outputPlan?.requiresAndroidExtendedLinearSurface ?? false;
     final surfaceGeneration = _surfaceGeneration;
     final creationParams = <String, Object?>{
       if (widget.debugLabel case final label?) 'debugLabel': label,
       'outputMode': extendedLinear
-          ? ErikaOutputMode.extendedLinear.nativeValue
+          ? outputPlan!.nativeMode.nativeValue
           : ErikaOutputMode.sdr.nativeValue,
       if (extendedLinear)
         'requestedHdrHeadroom': widget.player.edrHeadroom ?? 0.0,

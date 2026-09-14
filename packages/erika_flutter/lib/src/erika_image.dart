@@ -431,7 +431,6 @@ final class _ErikaImageState extends State<ErikaImage> {
   void _handleHdrReady() {
     if (!mounted || _image is! _ErikaHdrImage || _ready) return;
     setState(() => _ready = true);
-    widget.onPresentationChanged?.call(ErikaImagePresentation.hdr);
     _notifyReady(_generation);
   }
 

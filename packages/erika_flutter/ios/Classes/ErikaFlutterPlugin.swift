@@ -333,6 +333,14 @@ private struct ErikaOutputStatusC {
   var extendedLinearFrames: UInt64 = 0
 }
 
+// Kept separate from ErikaOutputStatusC for C ABI compatibility; field order
+// and types must stay aligned with ErikaDynamicRangeStatus in erika.h.
+private struct ErikaDynamicRangeStatusC {
+  var sourceDynamicRange: Int32 = 0
+  var activeDynamicRange: Int32 = 0
+  var hdrOutputConfirmed: Bool = false
+}
+
 // Keep field order and types aligned with `ErikaPresenterResourceStatus` in erika.h.
 private struct ErikaPresenterResourceStatusC {
   var deviceCurrentAllocatedBytes: UInt64 = 0
@@ -454,6 +462,7 @@ private final class ErikaNativeLibrary {
   typealias FreeSubtitleMemoryFontStatusFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
   typealias GetUpscalerStatusFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Int32
   typealias GetOutputStatusFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Int32
+  typealias GetDynamicRangeStatusFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Int32
   typealias GetResourceStatusFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Int32
   typealias SelectTrackFn = @convention(c) (UnsafeMutableRawPointer?, Int64) -> Int32
   typealias AddExternalSubtitleFn = @convention(c) (
@@ -529,6 +538,7 @@ private final class ErikaNativeLibrary {
   let freeSubtitleMemoryFontStatus: FreeSubtitleMemoryFontStatusFn?
   let getUpscalerStatus: GetUpscalerStatusFn?
   let getOutputStatus: GetOutputStatusFn?
+  let getDynamicRangeStatus: GetDynamicRangeStatusFn?
   let getResourceStatus: GetResourceStatusFn?
   let selectAudioTrack: SelectTrackFn
   let selectSubtitleTrack: SelectTrackFn
@@ -600,6 +610,7 @@ private final class ErikaNativeLibrary {
     freeSubtitleMemoryFontStatus = Self.loadOptional("erika_subtitle_memory_font_status_free", from: libraryHandle, as: FreeSubtitleMemoryFontStatusFn.self)
     getUpscalerStatus = Self.loadOptional("erika_presenter_get_upscaler_status", from: libraryHandle, as: GetUpscalerStatusFn.self)
     getOutputStatus = Self.loadOptional("erika_presenter_get_output_status", from: libraryHandle, as: GetOutputStatusFn.self)
+    getDynamicRangeStatus = Self.loadOptional("erika_presenter_get_dynamic_range_status", from: libraryHandle, as: GetDynamicRangeStatusFn.self)
     getResourceStatus = Self.loadOptional("erika_presenter_get_resource_status", from: libraryHandle, as: GetResourceStatusFn.self)
     selectAudioTrack = try Self.load("erika_presenter_select_audio_track", from: libraryHandle, as: SelectTrackFn.self)
     selectSubtitleTrack = try Self.load("erika_presenter_select_subtitle_track", from: libraryHandle, as: SelectTrackFn.self)
@@ -1129,7 +1140,14 @@ private final class ErikaPlayerHost {
       getStatus(handle, UnsafeMutableRawPointer(pointer))
     }
     try check(result, operation: "get_output_status")
-    return status.toFlutterMap()
+    var dynamicRange = ErikaDynamicRangeStatusC()
+    if let getDynamicRangeStatus = library.getDynamicRangeStatus {
+      let dynamicRangeResult = withUnsafeMutablePointer(to: &dynamicRange) { pointer in
+        getDynamicRangeStatus(handle, UnsafeMutableRawPointer(pointer))
+      }
+      try check(dynamicRangeResult, operation: "get_dynamic_range_status")
+    }
+    return status.toFlutterMap(dynamicRange: dynamicRange)
   }
 
   func resourceStatus() throws -> [String: Any] {
@@ -2298,6 +2316,10 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
       case "getUpscalerStatus":
         let args = try dictionaryArgs(call.arguments)
         result(try playerHost(from: args).upscalerStatus())
+      case "getHdrCapabilities":
+        let args = try dictionaryArgs(call.arguments)
+        _ = try playerHost(from: args)
+        result(hdrCapabilities())
       case "getOutputStatus":
         let args = try dictionaryArgs(call.arguments)
         result(try playerHost(from: args).outputStatus())
@@ -2970,6 +2992,28 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     return config
   }
 
+  private func hdrCapabilities() -> [String: Any] {
+    let hdrSurfaceSupported: Bool
+    if #available(iOS 16.0, *) {
+      hdrSurfaceSupported = UIScreen.main.potentialEDRHeadroom > 1.0
+    } else {
+      hdrSurfaceSupported = false
+    }
+    return [
+      "known": true,
+      "supportedDynamicRanges": hdrSurfaceSupported ? [1, 2, 3] : [1],
+      "hdrSurfaceSupported": hdrSurfaceSupported,
+      // Apple EDR uses the plugin's RGBA16Float surface, not a 10-bit target.
+      "tenBitSurfaceSupported": false,
+      // VideoToolbox capability discovery is not implemented by this bridge.
+      "hardwareAv1DecodeSupported": false,
+      "hardwareAv1DecodeKnown": false,
+      // The iOS presenter drives rendering through CADisplayLink.
+      "nativeVsyncSupported": true,
+      "fallbackReason": hdrSurfaceSupported ? 0 : 1,
+    ]
+  }
+
   private func resolvedEdrHeadroom(hdrDebug: Bool) -> Float {
     let environment = ProcessInfo.processInfo.environment
     if boolEnvironmentFlag("ERIKA_DISABLE_EDR", environment: environment) {
@@ -3256,7 +3300,7 @@ private extension ErikaUpscalerStatusC {
 }
 
 private extension ErikaOutputStatusC {
-  func toFlutterMap() -> [String: Any] {
+  func toFlutterMap(dynamicRange: ErikaDynamicRangeStatusC) -> [String: Any] {
     [
       "requestedMode": Int(requestedMode),
       "activeEncoding": Int(activeEncoding),
@@ -3271,6 +3315,9 @@ private extension ErikaOutputStatusC {
       "dataSpaceFailures": Int64(clamping: dataSpaceFailures),
       "headroomUpdates": Int64(clamping: headroomUpdates),
       "extendedLinearFrames": Int64(clamping: extendedLinearFrames),
+      "sourceDynamicRange": Int(dynamicRange.sourceDynamicRange),
+      "activeDynamicRange": Int(dynamicRange.activeDynamicRange),
+      "hdrOutputConfirmed": dynamicRange.hdrOutputConfirmed,
     ]
   }
 }

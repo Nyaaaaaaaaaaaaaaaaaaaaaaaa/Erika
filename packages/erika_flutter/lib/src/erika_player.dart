@@ -82,6 +82,62 @@ enum ErikaOutputMode {
   }
 }
 
+/// The native output mode and surface requirements resolved from a semantic
+/// [ErikaOutputMode] request.
+///
+/// Most applications should set [ErikaPlayer.outputMode] and use
+/// [ErikaVideoView]. Custom platform-surface hosts can use this plan to keep
+/// their surface compatible with the native player configuration.
+@immutable
+final class ErikaOutputSurfacePlan {
+  const ErikaOutputSurfacePlan._({
+    required this.requestedMode,
+    required this.nativeMode,
+    required this.requiresAndroidExtendedLinearSurface,
+  });
+
+  factory ErikaOutputSurfacePlan.forCurrentPlatform(
+    ErikaOutputMode requestedMode,
+  ) =>
+      ErikaOutputSurfacePlan.forPlatform(
+        requestedMode,
+        defaultTargetPlatform,
+      );
+
+  @visibleForTesting
+  factory ErikaOutputSurfacePlan.forPlatform(
+    ErikaOutputMode requestedMode,
+    TargetPlatform platform,
+  ) {
+    final nativeMode = switch (requestedMode) {
+      ErikaOutputMode.preferHdr => _nativeModeForPreferredHdr(platform),
+      _ => requestedMode,
+    };
+    return ErikaOutputSurfacePlan._(
+      requestedMode: requestedMode,
+      nativeMode: nativeMode,
+      requiresAndroidExtendedLinearSurface:
+          platform == TargetPlatform.android &&
+          nativeMode == ErikaOutputMode.extendedLinear,
+    );
+  }
+
+  final ErikaOutputMode requestedMode;
+  final ErikaOutputMode nativeMode;
+  final bool requiresAndroidExtendedLinearSurface;
+
+  static ErikaOutputMode _nativeModeForPreferredHdr(
+    TargetPlatform platform,
+  ) {
+    return switch (platform.name) {
+      'ohos' => ErikaOutputMode.preferHdr,
+      'android' => ErikaOutputMode.extendedLinear,
+      'iOS' || 'macOS' => ErikaOutputMode.appleEdr,
+      _ => ErikaOutputMode.auto,
+    };
+  }
+}
+
 /// How transparency is encoded in a video frame.
 enum ErikaVideoAlphaMode {
   /// The decoded video is fully opaque.
@@ -974,6 +1030,17 @@ class ErikaPlayer {
   final bool hdrDebug;
   final bool allowBackgroundPlayback;
 
+  /// Resolves [outputMode] into the matching native mode and surface contract.
+  ///
+  /// This is nullable only for the legacy case where no output mode is sent to
+  /// native code.
+  ErikaOutputSurfacePlan? get outputSurfacePlan {
+    final requestedMode = outputMode;
+    return requestedMode == null
+        ? null
+        : ErikaOutputSurfacePlan.forCurrentPlatform(requestedMode);
+  }
+
   int? get id => _id;
 
   Stream<ErikaPlayerEvent> get events async* {
@@ -1822,6 +1889,7 @@ class ErikaPlayer {
   }
 
   Future<int> _create() async {
+    final outputPlan = outputSurfacePlan;
     final requestedHeadroom =
         edrHeadroom ??
         (outputMode == ErikaOutputMode.preferHdr ||
@@ -1829,8 +1897,7 @@ class ErikaPlayer {
             ? 4.0
             : null);
     final arguments = <String, Object?>{
-      if (outputMode case final mode?)
-        'outputMode': _nativeOutputModeValue(mode),
+      if (outputPlan case final plan?) 'outputMode': plan.nativeMode.nativeValue,
       if (requestedHeadroom case final headroom?) 'edrHeadroom': headroom,
       if (upscaler case final mode?) 'upscaler': mode.nativeValue,
       if (videoAlphaMode != ErikaVideoAlphaMode.opaque)
@@ -1848,18 +1915,6 @@ class ErikaPlayer {
     _id = playerId;
     _controllerFor(playerId);
     return playerId;
-  }
-
-  static int _nativeOutputModeValue(ErikaOutputMode mode) {
-    if (mode != ErikaOutputMode.preferHdr) {
-      return mode.nativeValue;
-    }
-    return switch (defaultTargetPlatform.name) {
-      'ohos' => ErikaOutputMode.preferHdr.nativeValue,
-      'android' => ErikaOutputMode.extendedLinear.nativeValue,
-      'iOS' || 'macOS' => ErikaOutputMode.appleEdr.nativeValue,
-      _ => ErikaOutputMode.auto.nativeValue,
-    };
   }
 
   Future<int> _requireActiveAfter(Future<int> player) async {

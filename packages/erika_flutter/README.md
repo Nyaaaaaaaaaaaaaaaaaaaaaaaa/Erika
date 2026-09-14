@@ -297,7 +297,8 @@ The public image API owns capability checks, decode cancellation, HDR/SDR
 selection, native handles, textures, and release ordering. It reads the decoded
 file metadata: HDR is shown automatically when the device supports an HDR
 surface, otherwise the same source is rendered as SDR. There is no HDR switch
-for the caller.
+for the caller. `onReady` means that a surface is ready; HDR presentation is
+reported only through a native-confirmed `onPresentationChanged` callback.
 
 ```dart
 Future<void> main() async {
@@ -376,29 +377,27 @@ error instead of silently dropping the setting.
 
 ## Output Mode
 
-`ErikaPlayer()` lets the Apple plugins choose SDR or Apple EDR from the current
-screen and environment; Android defaults to SDR. To force Apple EDR from Dart:
+`ErikaOutputMode.preferHdr` is the cross-platform request for the best available
+HDR output. Erika resolves it once and uses that same output contract for both
+native player creation and the Flutter video surface: Android uses an FP16
+extended-linear scRGB `SurfaceView` with Hybrid Composition, while Apple uses
+Apple EDR.
 
 ```dart
 final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.appleEdr,
+  outputMode: ErikaOutputMode.preferHdr,
   edrHeadroom: 4.0,
 );
 ```
 
-Use `ErikaOutputMode.sdr` to force SDR output.
+Use `ErikaOutputMode.sdr` to force SDR output. The platform-specific
+`appleEdr` and `extendedLinear` modes remain for compatibility with custom
+hosts, but ordinary applications should use `auto`, `preferHdr`, or `sdr`.
 
 Android's high-headroom mode is FP16 **extended-linear scRGB**, not HDR10/PQ:
 
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.extendedLinear,
-  edrHeadroom: 4.0,
-);
-```
-
 `edrHeadroom` is a content-headroom ceiling. If it is omitted for an
-extended-linear player, Erika uses a 4x content ceiling while the
+Android extended-linear request, Erika uses a 4x content ceiling while the
 `SurfaceView` receives desired headroom `0` (system auto). An explicit value is
 also applied as the per-`SurfaceView` desired headroom on API 35. The current
 display HDR/SDR ratio, when available, further bounds the effective wgpu target.

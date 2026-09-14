@@ -58,6 +58,58 @@ void main() {
     });
   }
 
+  test('iOS output status includes native dynamic-range confirmation', () {
+    final plugin = _readNormalized('ios/Classes/ErikaFlutterPlugin.swift');
+
+    expect(plugin, contains('private struct ErikaDynamicRangeStatusC'));
+    expect(plugin, contains('typealias GetDynamicRangeStatusFn'));
+    expect(plugin, contains('let getDynamicRangeStatus: GetDynamicRangeStatusFn?'));
+    expect(
+      plugin,
+      contains('erika_presenter_get_dynamic_range_status'),
+    );
+    expect(plugin, contains('var dynamicRange = ErikaDynamicRangeStatusC()'));
+    expect(
+      plugin,
+      contains('if let getDynamicRangeStatus = library.getDynamicRangeStatus'),
+    );
+    expect(
+      plugin,
+      contains('return status.toFlutterMap(dynamicRange: dynamicRange)'),
+    );
+    expect(
+      plugin,
+      contains('"sourceDynamicRange": Int(dynamicRange.sourceDynamicRange)'),
+    );
+    expect(
+      plugin,
+      contains('"activeDynamicRange": Int(dynamicRange.activeDynamicRange)'),
+    );
+    expect(
+      plugin,
+      contains('"hdrOutputConfirmed": dynamicRange.hdrOutputConfirmed'),
+    );
+  });
+
+  test('iOS reports conservative EDR video capabilities', () {
+    final plugin = _readNormalized('ios/Classes/ErikaFlutterPlugin.swift');
+
+    expect(plugin, contains('case "getHdrCapabilities":'));
+    expect(plugin, contains('result(hdrCapabilities())'));
+    expect(plugin, contains('private func hdrCapabilities() -> [String: Any]'));
+    expect(plugin, contains('if #available(iOS 16.0, *)'));
+    expect(plugin, contains('UIScreen.main.potentialEDRHeadroom > 1.0'));
+    expect(plugin, contains('"known": true'));
+    expect(
+      plugin,
+      contains('"supportedDynamicRanges": hdrSurfaceSupported ? [1, 2, 3] : [1]'),
+    );
+    expect(plugin, contains('"tenBitSurfaceSupported": false'));
+    expect(plugin, contains('"hardwareAv1DecodeKnown": false'));
+    expect(plugin, contains('"nativeVsyncSupported": true'));
+    expect(plugin, contains('"fallbackReason": hdrSurfaceSupported ? 0 : 1'));
+  });
+
   test('Metal limits contentsFormat switching to UIKit and tvOS', () {
     final rendererFile = File('../../crates/erika/src/renderer/metal/apple.rs');
     if (!rendererFile.existsSync()) {

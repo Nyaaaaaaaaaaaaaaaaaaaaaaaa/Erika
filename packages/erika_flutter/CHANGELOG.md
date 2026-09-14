@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolved `preferHdr` once for native player creation and Android video-surface
+  selection, so a preferred HDR player uses the matching Hybrid-Composition
+  FP16 SurfaceView instead of an incompatible SDR TextureView.
+- Made static-image readiness independent from HDR confirmation: image
+  presentation callbacks now report HDR only after the native surface confirms
+  HDR output.
+
 ## 0.2.0 - 2026-09-03
 
 - Added standalone decode-once static AVIF paths on Android and iOS: bounded

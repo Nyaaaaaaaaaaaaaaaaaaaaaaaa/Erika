@@ -250,26 +250,21 @@ options 入口，因此请求预读调参时会抛出明确错误，而不会静
 
 ## Output Mode
 
-`ErikaPlayer()` 会让 Apple 插件根据当前屏幕和环境选择 SDR 或 Apple EDR；Android 默认
-为 SDR。若要从 Dart 强制 Apple EDR：
+`ErikaOutputMode.preferHdr` 是跨平台的“尽可能使用 HDR”请求。Erika 只解析一次该请求，
+并让原生 player 创建和 Flutter 视频 surface 共用同一输出契约：Android 使用 FP16
+extended-linear scRGB 的 Hybrid Composition `SurfaceView`，Apple 使用 Apple EDR。
 
 ```dart
 final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.appleEdr,
+  outputMode: ErikaOutputMode.preferHdr,
   edrHeadroom: 4.0,
 );
 ```
 
-使用 `ErikaOutputMode.sdr` 可强制 SDR 输出。
+使用 `ErikaOutputMode.sdr` 可强制 SDR 输出。平台专用的 `appleEdr` 与
+`extendedLinear` 仍为自定义宿主保留兼容性；普通应用应使用 `auto`、`preferHdr` 或 `sdr`。
 
 Android 的高 headroom 模式是 FP16 **extended-linear scRGB**，不是 HDR10/PQ：
-
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.extendedLinear,
-  edrHeadroom: 4.0,
-);
-```
 
 `edrHeadroom` 是内容 headroom 上限。Extended-linear player 未传该参数时，Erika 使用默认
 4x 内容上限，同时给 `SurfaceView` 传 desired headroom `0`（系统 auto）。显式值在 API 35
