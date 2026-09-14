@@ -10,6 +10,8 @@ import 'package:flutter/widgets.dart';
 
 const MethodChannel _imageChannel = MethodChannel('erika_flutter/player');
 
+bool get _isHarmonyOsNext => !kIsWeb && defaultTargetPlatform.name == 'ohos';
+
 enum ErikaImageErrorReason {
   unsupportedPlatform,
   unsupportedFormat,
@@ -108,6 +110,7 @@ final class ErikaImageCapabilities {
     required this.maxSourcePixels,
     required this.maxOutputPixels,
     required this.maxConcurrentDecodes,
+    this.maxActiveImageSurfaces = 0,
   });
 
   const ErikaImageCapabilities.unsupported()
@@ -117,7 +120,8 @@ final class ErikaImageCapabilities {
       maxEncodedBytes = 0,
       maxSourcePixels = 0,
       maxOutputPixels = 0,
-      maxConcurrentDecodes = 0;
+      maxConcurrentDecodes = 0,
+      maxActiveImageSurfaces = 0;
 
   final bool sdrDecodeSupported;
   final bool hdrSurfaceSupported;
@@ -126,6 +130,12 @@ final class ErikaImageCapabilities {
   final int maxSourcePixels;
   final int maxOutputPixels;
   final int maxConcurrentDecodes;
+
+  /// Maximum retained native image surfaces, when the platform reports one.
+  ///
+  /// On HarmonyOS NEXT, an SDR fallback Texture retains the same native
+  /// surface as HDR, so this is the total static-image Texture limit.
+  final int maxActiveImageSurfaces;
 }
 
 final class ErikaImageDiagnostics {
@@ -161,7 +171,8 @@ abstract final class ErikaImagePipeline {
   static bool get isSupported =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
+          defaultTargetPlatform == TargetPlatform.iOS ||
+          _isHarmonyOsNext);
 
   static ErikaImagePolicy get policy => _policy;
 
@@ -205,6 +216,7 @@ abstract final class ErikaImagePipeline {
       maxSourcePixels: _integer(value['maxSourcePixels']),
       maxOutputPixels: _integer(value['maxOutputPixels']),
       maxConcurrentDecodes: _integer(value['maxConcurrentDecodes']),
+      maxActiveImageSurfaces: _integer(value['maxActiveImageSurfaces']),
     );
   }
 
@@ -494,6 +506,7 @@ final class _ErikaImageState extends State<ErikaImage> {
               _ErikaFittedHdrSurface(
                 image: image,
                 fit: widget.fit,
+                filterQuality: widget.filterQuality,
                 onReady: _handleHdrReady,
                 onError: _handleHdrError,
                 onOutputStatusChanged: _handleHdrStatus,
@@ -773,6 +786,18 @@ final class _ErikaSdrCoordinator {
 
   void _retainIdle(_SharedSdrDecode shared) {
     if (shared.evicted || shared.texture == null || shared.leases != 0) return;
+    // HarmonyOS NEXT has one retained native static-image surface. Keeping an
+    // invisible SDR Texture in this cache would consume that slot and prevent
+    // a later HDR image (or its SDR fallback) from decoding. Release it as
+    // soon as its last lease ends instead of treating it as reusable idle data.
+    if (_isHarmonyOsNext) {
+      shared.evicted = true;
+      if (identical(_entries[shared.key], shared)) {
+        _entries.remove(shared.key);
+      }
+      shared.nativeLease.release();
+      return;
+    }
     if (identical(_idle[shared.key], shared)) return;
     _idle[shared.key] = shared;
     _idleTextureBytes += shared.textureBytes;
@@ -863,12 +888,14 @@ bool _hdrImageHandlerInstalled = false;
 final class _ErikaHdrImageView extends StatefulWidget {
   const _ErikaHdrImageView({
     required this.image,
+    required this.filterQuality,
     required this.onReady,
     required this.onError,
     required this.onOutputStatusChanged,
   });
 
   final _ErikaHdrImage image;
+  final FilterQuality filterQuality;
   final VoidCallback onReady;
   final ValueChanged<ErikaImageException> onError;
   final ValueChanged<_ErikaImageOutputStatus> onOutputStatusChanged;
@@ -925,6 +952,16 @@ final class _ErikaHdrImageViewState extends State<_ErikaHdrImageView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isHarmonyOsNext) {
+      return _ErikaOhosHdrImageView(
+        key: ValueKey<int>(widget.image.imageId),
+        image: widget.image,
+        filterQuality: widget.filterQuality,
+        onReady: widget.onReady,
+        onError: widget.onError,
+        onOutputStatusChanged: widget.onOutputStatusChanged,
+      );
+    }
     const viewType = 'erika_flutter/hdr_image_view';
     final creationParams = <String, Object?>{
       'imageId': widget.image.imageId,
@@ -977,10 +1014,285 @@ final class _ErikaHdrImageViewState extends State<_ErikaHdrImageView> {
   }
 }
 
+/// A HarmonyOS NEXT static image uses the same Flutter external-texture
+/// ownership model as video. It never uses Android's platform-view channel:
+/// the ArkTS bridge creates an OHNativeWindow-backed Texture, native code
+/// renders it, then returns the post-render output status.
+final class _ErikaOhosHdrImageView extends StatefulWidget {
+  const _ErikaOhosHdrImageView({
+    super.key,
+    required this.image,
+    required this.filterQuality,
+    required this.onReady,
+    required this.onError,
+    required this.onOutputStatusChanged,
+  });
+
+  final _ErikaHdrImage image;
+  final FilterQuality filterQuality;
+  final VoidCallback onReady;
+  final ValueChanged<ErikaImageException> onError;
+  final ValueChanged<_ErikaImageOutputStatus> onOutputStatusChanged;
+
+  @override
+  State<_ErikaOhosHdrImageView> createState() => _ErikaOhosHdrImageViewState();
+}
+
+final class _ErikaOhosHdrImageViewState extends State<_ErikaOhosHdrImageView> {
+  int? _textureId;
+  int _generation = 0;
+  bool _updateInFlight = false;
+  _OhosImageSurfaceMetrics? _activeMetrics;
+  _OhosImageSurfaceMetrics? _pendingMetrics;
+
+  @override
+  void didUpdateWidget(covariant _ErikaOhosHdrImageView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image.imageId == widget.image.imageId) return;
+    final textureId = _textureId;
+    _textureId = null;
+    _activeMetrics = null;
+    _pendingMetrics = null;
+    ++_generation;
+    if (textureId != null) {
+      unawaited(_releaseTexture(oldWidget.image.imageId, textureId));
+    }
+  }
+
+  @override
+  void dispose() {
+    final textureId = _textureId;
+    _textureId = null;
+    ++_generation;
+    if (textureId != null) {
+      unawaited(_releaseTexture(widget.image.imageId, textureId));
+    }
+    super.dispose();
+  }
+
+  void _queueMetrics(_OhosImageSurfaceMetrics metrics) {
+    if (metrics == _activeMetrics && _pendingMetrics == null) return;
+    _pendingMetrics = metrics;
+    if (_updateInFlight) return;
+    _updateInFlight = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_flushMetrics());
+    });
+  }
+
+  Future<void> _flushMetrics() async {
+    try {
+      while (mounted) {
+        final metrics = _pendingMetrics;
+        _pendingMetrics = null;
+        if (metrics == null) return;
+        final textureId = _textureId;
+        if (textureId == null) {
+          final generation = _generation;
+          final imageId = widget.image.imageId;
+          try {
+            final attached = await _imageChannel
+                .invokeMapMethod<String, Object?>(
+                  'createHdrImageTexture',
+                  <String, Object>{
+                    'imageId': imageId,
+                    'width': metrics.width,
+                    'height': metrics.height,
+                    'scale': metrics.scale,
+                  },
+                );
+            final createdTextureId = _integer(attached?['textureId']);
+            if (createdTextureId <= 0) {
+              throw const ErikaImageException(
+                ErikaImageErrorReason.renderer,
+                'The native HDR image surface returned no texture',
+              );
+            }
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId) {
+              await _releaseTexture(imageId, createdTextureId);
+              return;
+            }
+            _textureId = createdTextureId;
+            _activeMetrics = metrics;
+            _reportOutputStatus(attached?['outputStatus']);
+            widget.onReady();
+            if (mounted &&
+                generation == _generation &&
+                _textureId == createdTextureId) {
+              setState(() {});
+            }
+          } on PlatformException catch (error) {
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId) {
+              return;
+            }
+            _reportSurfaceError(
+              _imageException(error, 'Unable to attach HDR image surface'),
+            );
+          } on ErikaImageException catch (error) {
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId) {
+              return;
+            }
+            _reportSurfaceError(error);
+          } catch (_) {
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId) {
+              return;
+            }
+            _reportSurfaceError(
+              const ErikaImageException(
+                ErikaImageErrorReason.renderer,
+                'Unable to attach HDR image surface',
+              ),
+            );
+          }
+        } else if (metrics != _activeMetrics) {
+          final generation = _generation;
+          final imageId = widget.image.imageId;
+          try {
+            final resized = await _imageChannel
+                .invokeMapMethod<String, Object?>(
+                  'resizeHdrImageTexture',
+                  <String, Object>{
+                    'imageId': imageId,
+                    'textureId': textureId,
+                    'width': metrics.width,
+                    'height': metrics.height,
+                    'scale': metrics.scale,
+                  },
+                );
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId ||
+                _textureId != textureId) {
+              return;
+            }
+            _activeMetrics = metrics;
+            _reportOutputStatus(resized?['outputStatus']);
+          } on PlatformException catch (error) {
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId ||
+                _textureId != textureId) {
+              return;
+            }
+            _reportSurfaceError(
+              _imageException(error, 'Unable to resize HDR image surface'),
+            );
+          } catch (_) {
+            if (!mounted ||
+                generation != _generation ||
+                widget.image.imageId != imageId ||
+                _textureId != textureId) {
+              return;
+            }
+            _reportSurfaceError(
+              const ErikaImageException(
+                ErikaImageErrorReason.renderer,
+                'Unable to resize HDR image surface',
+              ),
+            );
+          }
+        }
+      }
+    } finally {
+      _updateInFlight = false;
+      if (mounted && _pendingMetrics != null) {
+        _queueMetrics(_pendingMetrics!);
+      }
+    }
+  }
+
+  Future<void> _releaseTexture(int imageId, int textureId) async {
+    try {
+      await _imageChannel.invokeMethod<void>(
+        'releaseHdrImageTexture',
+        <String, Object>{'imageId': imageId, 'textureId': textureId},
+      );
+    } catch (_) {
+      // Native image destruction is authoritative and idempotent. A concurrent
+      // dispose can legitimately win this release race.
+    }
+  }
+
+  void _reportOutputStatus(Object? rawStatus) {
+    if (rawStatus is! Map) return;
+    final status = Map<Object?, Object?>.from(rawStatus);
+    // ArkTS sends this map only after native attach/resize has rendered a
+    // frame. hdrOutputConfirmed remains false for the verified SDR fallback.
+    widget.onOutputStatusChanged(
+      _ErikaImageOutputStatus(
+        hdrOutputConfirmed: status['hdrOutputConfirmed'] == true,
+        activeDynamicRange: _dynamicRange(status['activeDynamicRange']),
+        activeEncoding: _integer(status['activeEncoding']),
+        fallbackReason: _integer(status['fallbackReason']),
+      ),
+    );
+  }
+
+  void _reportSurfaceError(ErikaImageException error) {
+    if (mounted) widget.onError(error);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.devicePixelRatioOf(context);
+        final logicalWidth = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : constraints.minWidth;
+        final logicalHeight = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : constraints.minHeight;
+        _queueMetrics(
+          _OhosImageSurfaceMetrics(
+            (logicalWidth * scale).round().clamp(1, 16384).toInt(),
+            (logicalHeight * scale).round().clamp(1, 16384).toInt(),
+            scale,
+          ),
+        );
+        final textureId = _textureId;
+        return textureId == null
+            ? const SizedBox.expand()
+            : Texture(
+                textureId: textureId,
+                filterQuality: widget.filterQuality,
+              );
+      },
+    );
+  }
+}
+
+final class _OhosImageSurfaceMetrics {
+  const _OhosImageSurfaceMetrics(this.width, this.height, this.scale);
+
+  final int width;
+  final int height;
+  final double scale;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _OhosImageSurfaceMetrics &&
+      other.width == width &&
+      other.height == height &&
+      other.scale == scale;
+
+  @override
+  int get hashCode => Object.hash(width, height, scale);
+}
+
 final class _ErikaFittedHdrSurface extends StatelessWidget {
   const _ErikaFittedHdrSurface({
     required this.image,
     required this.fit,
+    required this.filterQuality,
     required this.onReady,
     required this.onError,
     required this.onOutputStatusChanged,
@@ -988,6 +1300,7 @@ final class _ErikaFittedHdrSurface extends StatelessWidget {
 
   final _ErikaHdrImage image;
   final BoxFit fit;
+  final FilterQuality filterQuality;
   final VoidCallback onReady;
   final ValueChanged<ErikaImageException> onError;
   final ValueChanged<_ErikaImageOutputStatus> onOutputStatusChanged;
@@ -1029,6 +1342,7 @@ final class _ErikaFittedHdrSurface extends StatelessWidget {
 
   Widget _view() => _ErikaHdrImageView(
     image: image,
+    filterQuality: filterQuality,
     onReady: onReady,
     onError: onError,
     onOutputStatusChanged: onOutputStatusChanged,

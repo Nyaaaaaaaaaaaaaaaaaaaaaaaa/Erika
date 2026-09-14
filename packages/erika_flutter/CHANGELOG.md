@@ -8,6 +8,9 @@
 - Made static-image readiness independent from HDR confirmation: image
   presentation callbacks now report HDR only after the native surface confirms
   HDR output.
+- Added HarmonyOS NEXT static-image support through a typed Flutter external
+  texture bridge, with policy-backed decode limits, explicit SDR fallback, and
+  post-render `hdrOutputConfirmed` status.
 
 ## 0.2.0 - 2026-09-03
 

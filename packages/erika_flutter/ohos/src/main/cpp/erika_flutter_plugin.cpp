@@ -1,4 +1,5 @@
 #include "include/erika_flutter/erika_flutter_plugin.h"
+#include "include/erika_flutter/erika_flutter_image.h"
 
 #include <napi/native_api.h>
 #include <native_window/external_window.h>
@@ -427,8 +428,12 @@ napi_value Init(napi_env env, napi_value exports) {
       {"nativeGetHdrCapabilitiesJson", nullptr, NativeGetHdrCapabilitiesJson, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"nativeCaptureFrame", nullptr, NativeCaptureFrame, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
-  napi_define_properties(
-      env, exports, sizeof(descriptors) / sizeof(descriptors[0]), descriptors);
+  if (napi_define_properties(
+          env, exports, sizeof(descriptors) / sizeof(descriptors[0]),
+          descriptors) != napi_ok ||
+      ErikaFlutterDefineImageExports(env, exports) != napi_ok) {
+    return nullptr;
+  }
   return exports;
 }
 

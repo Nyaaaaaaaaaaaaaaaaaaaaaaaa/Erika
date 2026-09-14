@@ -241,6 +241,7 @@ set(ERIKA_HARMONY_NEXT_NATIVE
 )
 add_library(${PLUGIN_NAME} SHARED
   erika_flutter_plugin.cpp
+  erika_flutter_image.cpp
   "${ERIKA_HARMONY_NEXT_NATIVE}/erika_harmony_next_surface.cpp"
 )
 if(NOT ERIKA_USE_PREBUILT)

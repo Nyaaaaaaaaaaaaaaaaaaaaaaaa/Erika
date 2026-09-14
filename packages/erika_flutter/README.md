@@ -300,6 +300,26 @@ surface, otherwise the same source is rendered as SDR. There is no HDR switch
 for the caller. `onReady` means that a surface is ready; HDR presentation is
 reported only through a native-confirmed `onPresentationChanged` callback.
 
+On HarmonyOS NEXT, static images use a separate Flutter external texture rather
+than an Android platform view. The bridge creates an `OHNativeWindow`, requests
+the verified PQ/10-bit surface only for HDR source metadata, and returns the
+native render result before invoking `onPresentationChanged`. If any native
+surface check fails, the same retained frame is rendered on the explicit SDR
+fallback. `hdrSurfaceSupported` means this native path is available; only
+`onPresentationChanged(ErikaImagePresentation.hdr)` confirms an HDR frame was
+actually presented. The HarmonyOS bridge serializes static decoding, so callers
+must keep `ErikaImagePolicy.maxConcurrentDecodes` at `1` on that platform; the
+reported capabilities expose the same limit. A Flutter static-image Texture
+(including an explicit SDR fallback) retains one native surface, so HarmonyOS
+allows one active static surface at a time and reports
+`maxActiveImageSurfaces: 1`. Idle SDR Texture caching is disabled on HarmonyOS
+so an invisible fallback cannot reserve that slot ahead of the next image.
+
+The Flutter bridge is intentionally packaged with `erika_flutter`, rather than
+linking the standalone `erika_ohos` OHPM module. Each package is independently
+published and builds its own N-API library; a future shared bridge should be a
+versioned OHPM dependency, not a relative cross-package source include.
+
 ```dart
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

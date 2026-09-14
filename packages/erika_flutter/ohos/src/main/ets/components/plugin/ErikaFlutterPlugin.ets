@@ -33,6 +33,91 @@ interface ErikaTexture {
   playerId: number;
 }
 
+interface ErikaImageTexture {
+  textureId: number;
+  entry: SurfaceTextureEntry;
+  surfaceId: number;
+  width: number;
+  height: number;
+  scale: number;
+  imageId: number;
+  surfaceGeneration: number;
+  presentation: string;
+}
+
+interface ErikaImageNativeResponse {
+  ok: boolean;
+  status: number;
+  kind?: number;
+  error?: string;
+  value?: ESObject;
+}
+
+interface ErikaImageMetadataValue {
+  width: number;
+  height: number;
+  sourceDynamicRange: number;
+}
+
+interface ErikaImageDecodedValue {
+  imageId: number;
+  metadata: ErikaImageMetadataValue;
+}
+
+interface ErikaImageTextureAttachment {
+  texture: ErikaImageTexture;
+  outputStatus: ESObject;
+}
+
+// Keep static-image N-API calls typed independently from the legacy player
+// module surface. The declaration file publishes the same signatures to OHPM
+// consumers; this local boundary makes plugin implementation type checks
+// explicit even when the N-API default import is treated as an untyped module.
+interface ErikaImageNativeModule {
+  nativeConfigureImagePipeline(
+    maxEncodedBytes: number,
+    maxSourcePixels: number,
+    maxOutputPixels: number,
+    maxPacketsBeforeFrame: number,
+    decodeTimeoutMillis: number,
+    maxQueuedDecodes: number,
+    maxConcurrentDecodes: number,
+  ): ErikaImageNativeResponse;
+  nativeGetImageCapabilities(): ESObject;
+  nativeGetImageDiagnostics(): ESObject;
+  nativeDecodeImageSurface(
+    operationId: number,
+    localPath: string,
+    cacheWidth: number,
+    cacheHeight: number,
+  ): Promise<ErikaImageDecodedValue>;
+  nativeCancelImageDecode(operationId: number): boolean;
+  nativeAttachHdrImageSurface(
+    imageId: number,
+    surfaceId: number,
+    surfaceGeneration: number,
+    width: number,
+    height: number,
+    scale: number,
+    preferHdr: boolean,
+  ): Promise<ErikaImageNativeResponse>;
+  nativeResizeHdrImageSurface(
+    imageId: number,
+    surfaceGeneration: number,
+    width: number,
+    height: number,
+    scale: number,
+  ): Promise<ErikaImageNativeResponse>;
+  nativeDetachHdrImageSurface(
+    imageId: number,
+    surfaceGeneration: number,
+  ): Promise<ErikaImageNativeResponse>;
+  nativeDestroyHdrImage(imageId: number): Promise<ErikaImageNativeResponse>;
+}
+
+const erikaImageNative: ErikaImageNativeModule =
+  erikaNative as ErikaImageNativeModule;
+
 interface ErikaMediaMetadata {
   title: string;
   artist?: string;
@@ -75,6 +160,12 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
   private players: Set<number> = new Set();
   private outputModes: Map<number, number> = new Map();
   private textures: Map<number, ErikaTexture> = new Map();
+  // Static-image textures are intentionally independent of video textures.
+  // An image surface owns an ErikaImageHandle, not an ErikaPlayer.
+  private imageTextures: Map<number, ErikaImageTexture> = new Map();
+  private imageTextureByImageId: Map<number, number> = new Map();
+  private imageIds: Set<number> = new Set();
+  private nextImageSurfaceGeneration: number = 1;
   private mediaMetadata: Map<number, ErikaMediaMetadata> = new Map();
   private mediaStates: Map<number, ErikaMediaState> = new Map();
   private mediaNavigation: Map<number, ErikaMediaNavigation> = new Map();
@@ -117,6 +208,17 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
 
   onDetachedFromEngine(_binding: FlutterPluginBinding): void {
     this.stopEventLoop();
+    this.imageTextures.forEach((texture: ErikaImageTexture, textureId: number): void => {
+      // nativeDestroyHdrImage synchronously claims the image session before
+      // its asynchronous worker releases the retained OHNativeWindow. Keep
+      // that ownership handoff ahead of unregistering Flutter's texture.
+      this.destroyImageQuietly(texture.imageId);
+      this.binding?.getTextureRegistry()?.unregisterTexture(textureId);
+    });
+    this.imageTextures.clear();
+    this.imageTextureByImageId.clear();
+    this.imageIds.forEach((imageId: number): void => this.destroyImageQuietly(imageId));
+    this.imageIds.clear();
     this.textures.forEach((texture: ErikaTexture, textureId: number): void => {
       if (texture.playerId > 0) {
         erikaNative.nativeDetachSurface(texture.playerId);
@@ -154,6 +256,54 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
 
   onMethodCall(call: MethodCall, result: MethodResult): void {
     const args: Map<string, ESObject> = call.args as Map<string, ESObject>;
+    if (call.method === 'configureImagePipeline') {
+      this.configureImagePipeline(args, result);
+      return;
+    }
+    if (call.method === 'getImageCapabilities') {
+      this.getImageCapabilities(result);
+      return;
+    }
+    if (call.method === 'getImageDiagnostics') {
+      this.getImageDiagnostics(result);
+      return;
+    }
+    if (call.method === 'decodeImage') {
+      this.decodeImage(args, result);
+      return;
+    }
+    if (call.method === 'decodeSdrTexture') {
+      this.decodeSdrTexture(args, result);
+      return;
+    }
+    if (call.method === 'decodeHdrImage') {
+      this.decodeHdrImage(args, result);
+      return;
+    }
+    if (call.method === 'cancelImageDecode') {
+      this.cancelImageDecode(args, result);
+      return;
+    }
+    if (call.method === 'disposeSdrTexture') {
+      this.disposeSdrTexture(args, result);
+      return;
+    }
+    if (call.method === 'disposeHdrImage') {
+      this.disposeHdrImage(args, result);
+      return;
+    }
+    if (call.method === 'createHdrImageTexture') {
+      this.createHdrImageTexture(args, result);
+      return;
+    }
+    if (call.method === 'resizeHdrImageTexture') {
+      this.resizeHdrImageTexture(args, result);
+      return;
+    }
+    if (call.method === 'releaseHdrImageTexture') {
+      this.releaseHdrImageTexture(args, result);
+      return;
+    }
     if (call.method === 'create') {
       this.createPlayer(args, result);
       return;
@@ -211,6 +361,478 @@ export default class ErikaFlutterPlugin implements FlutterPlugin, MethodCallHand
       return;
     }
     result.notImplemented();
+  }
+
+  private configureImagePipeline(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const response = erikaImageNative.nativeConfigureImagePipeline(
+      this.numberArg(args, 'maxEncodedBytes', 0),
+      this.numberArg(args, 'maxSourcePixels', 0),
+      this.numberArg(args, 'maxOutputPixels', 0),
+      this.numberArg(args, 'maxPacketsBeforeFrame', 0),
+      this.numberArg(args, 'decodeTimeoutMillis', 0),
+      this.numberArg(args, 'maxQueuedDecodes', 0),
+      this.numberArg(args, 'maxConcurrentDecodes', 0),
+    );
+    if (!response.ok) {
+      result.error(
+        'ERIKA_IMAGE_ERROR',
+        response.error ?? 'Unable to configure the Erika image pipeline',
+        { kind: response.kind ?? 9 },
+      );
+      return;
+    }
+    result.success(null);
+  }
+
+  private getImageCapabilities(result: MethodResult): void {
+    // hdrSurfaceSupported asserts that the native Texture/OHNativeWindow path
+    // exists. It deliberately does not promise display HDR: the render result
+    // is the only source of hdrOutputConfirmed.
+    result.success(erikaImageNative.nativeGetImageCapabilities());
+  }
+
+  private getImageDiagnostics(result: MethodResult): void {
+    const diagnostics = erikaImageNative.nativeGetImageDiagnostics();
+    let sdrTextureCount = 0;
+    this.imageTextures.forEach((texture: ErikaImageTexture): void => {
+      if (texture.presentation === 'sdr') {
+        sdrTextureCount += 1;
+      }
+    });
+    diagnostics.sdrTextureCount = sdrTextureCount;
+    diagnostics.platformViewCount = 0;
+    result.success(diagnostics);
+  }
+
+  private decodeImage(args: Map<string, ESObject>, result: MethodResult): void {
+    this.decodeImageSurface(args, result, 0);
+  }
+
+  private decodeSdrTexture(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    this.decodeImageSurface(args, result, 1);
+  }
+
+  private decodeHdrImage(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    this.decodeImageSurface(args, result, 2);
+  }
+
+  // decodeMode: 0 = automatic from decoded metadata, 1 = forced SDR,
+  // 2 = explicitly retained HDR surface. Every mode retains one native image
+  // session because Flutter Texture presentation needs an OHNativeWindow; the
+  // native bridge therefore admits one active static surface, including SDR
+  // fallback. C++ owns decode cancellation and native handles; this layer owns
+  // only Flutter textures.
+  private decodeImageSurface(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+    decodeMode: number,
+  ): void {
+    const operationId = this.numberArg(args, 'operationId', 0);
+    const pathValue = args.get('path');
+    const path = typeof pathValue === 'string' ? pathValue : '';
+    const width = Math.max(0, Math.trunc(this.numberArg(args, 'cacheWidth', 0)));
+    const height = Math.max(0, Math.trunc(this.numberArg(args, 'cacheHeight', 0)));
+    if (operationId <= 0 || path.length === 0 || width < 0 || height < 0) {
+      result.error(
+        'ERIKA_IMAGE_ERROR',
+        'operationId, path, and cache dimensions are invalid',
+        { kind: 4 },
+      );
+      return;
+    }
+    const nativePromise = erikaImageNative.nativeDecodeImageSurface(
+      operationId,
+      path,
+      width,
+      height,
+    );
+    nativePromise.then(
+      (decoded: ErikaImageDecodedValue): void => {
+        const imageId = Math.trunc(decoded.imageId);
+        const metadata = decoded.metadata as ErikaImageMetadataValue;
+        if (imageId <= 0 || metadata === undefined || metadata === null) {
+          result.error(
+            'ERIKA_IMAGE_ERROR',
+            'HarmonyOS NEXT returned an invalid static image session',
+            { kind: 9 },
+          );
+          return;
+        }
+        this.imageIds.add(imageId);
+        const sourceIsHdr = metadata.sourceDynamicRange >= 2;
+        const deliverHdr = decodeMode === 2 ||
+          (decodeMode === 0 && sourceIsHdr);
+        if (deliverHdr) {
+          result.success(this.imagePayload(
+            metadata,
+            'hdr',
+            imageId,
+            0,
+            width,
+            height,
+          ));
+          return;
+        }
+        this.createImageTexture(
+          imageId,
+          Math.max(1, width),
+          Math.max(1, height),
+          1.0,
+          false,
+          'sdr',
+        ).then(
+          (attachment: ErikaImageTextureAttachment): void => {
+            result.success(this.imagePayload(
+              metadata,
+              'sdr',
+              0,
+              attachment.texture.textureId,
+              attachment.texture.width,
+              attachment.texture.height,
+            ));
+          },
+          (_error: ESObject): void => {
+            result.error(
+              'ERIKA_IMAGE_ERROR',
+              'Unable to attach the HarmonyOS NEXT SDR image texture',
+              { kind: 8 },
+            );
+          },
+        );
+      },
+      (_error: ESObject): void => {
+        result.error(
+          'ERIKA_IMAGE_ERROR',
+          'Unable to decode the HarmonyOS NEXT static image',
+          { kind: 9 },
+        );
+      },
+    );
+  }
+
+  private cancelImageDecode(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const operationId = this.numberArg(args, 'operationId', 0);
+    result.success(
+      operationId > 0 &&
+        erikaImageNative.nativeCancelImageDecode(operationId),
+    );
+  }
+
+  private disposeSdrTexture(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const textureId = this.numberArg(args, 'textureId', -1);
+    const texture = this.imageTextures.get(textureId);
+    if (!texture) {
+      result.success(null);
+      return;
+    }
+    this.disposeImage(texture.imageId, result);
+  }
+
+  private disposeHdrImage(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    this.disposeImage(this.numberArg(args, 'imageId', 0), result);
+  }
+
+  private disposeImage(imageId: number, result: MethodResult): void {
+    if (imageId <= 0) {
+      result.success(null);
+      return;
+    }
+    const nativePromise = erikaImageNative.nativeDestroyHdrImage(
+      imageId,
+    );
+    nativePromise.then(
+      (response: ErikaImageNativeResponse): void => {
+        if (!response.ok) {
+          result.error(
+            'ERIKA_IMAGE_ERROR',
+            response.error ?? 'Unable to dispose the static image',
+            { kind: response.kind ?? 8 },
+          );
+          return;
+        }
+        this.removeImageTextureForImage(imageId);
+        this.imageIds.delete(imageId);
+        result.success(null);
+      },
+      (_error: ESObject): void => {
+        result.error(
+          'ERIKA_IMAGE_ERROR',
+          'Unable to dispose the HarmonyOS NEXT static image',
+          { kind: 8 },
+        );
+      },
+    );
+  }
+
+  private createHdrImageTexture(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const imageId = this.numberArg(args, 'imageId', 0);
+    if (imageId <= 0 || !this.imageIds.has(imageId)) {
+      result.error('ERIKA_IMAGE_ERROR', 'Unknown HDR image session', { kind: 4 });
+      return;
+    }
+    if (this.imageTextureByImageId.has(imageId)) {
+      result.error(
+        'ERIKA_IMAGE_ERROR',
+        'HDR image is already attached to a Flutter texture',
+        { kind: 10 },
+      );
+      return;
+    }
+    const width = Math.max(1, Math.trunc(this.numberArg(args, 'width', 1)));
+    const height = Math.max(1, Math.trunc(this.numberArg(args, 'height', 1)));
+    const scale = Math.max(0.1, this.numberArg(args, 'scale', 1.0));
+    this.createImageTexture(
+      imageId,
+      width,
+      height,
+      scale,
+      true,
+      'hdr',
+    ).then(
+      (attachment: ErikaImageTextureAttachment): void => {
+        result.success({
+          textureId: attachment.texture.textureId,
+          outputStatus: attachment.outputStatus,
+        });
+      },
+      (_error: ESObject): void => {
+        result.error(
+          'ERIKA_IMAGE_ERROR',
+          'Unable to attach the HarmonyOS NEXT HDR image texture',
+          { kind: 8 },
+        );
+      },
+    );
+  }
+
+  private resizeHdrImageTexture(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const textureId = this.numberArg(args, 'textureId', -1);
+    const imageId = this.numberArg(args, 'imageId', 0);
+    const texture = this.imageTextures.get(textureId);
+    if (!texture || texture.imageId !== imageId || texture.presentation !== 'hdr') {
+      result.error('ERIKA_IMAGE_ERROR', 'Unknown HDR image texture', { kind: 4 });
+      return;
+    }
+    texture.width = Math.max(1, Math.trunc(this.numberArg(args, 'width', texture.width)));
+    texture.height = Math.max(1, Math.trunc(this.numberArg(args, 'height', texture.height)));
+    texture.scale = Math.max(0.1, this.numberArg(args, 'scale', texture.scale));
+    this.binding?.getTextureRegistry()?.setTextureBufferSize(
+      textureId,
+      texture.width,
+      texture.height,
+    );
+    const nativePromise = erikaImageNative.nativeResizeHdrImageSurface(
+      imageId,
+      texture.surfaceGeneration,
+      texture.width,
+      texture.height,
+      texture.scale,
+    );
+    nativePromise.then(
+      (response: ErikaImageNativeResponse): void => {
+        if (!response.ok) {
+          this.destroyImageAfterSurfaceFailure(imageId).then((): void => {
+            result.error(
+              'ERIKA_IMAGE_ERROR',
+              response.error ?? 'Unable to resize the HDR image texture',
+              { kind: response.kind ?? 8 },
+            );
+          });
+          return;
+        }
+        result.success({ outputStatus: response.value ?? {} });
+      },
+      (_error: ESObject): void => {
+        this.destroyImageAfterSurfaceFailure(imageId).then((): void => {
+          result.error(
+            'ERIKA_IMAGE_ERROR',
+            'Unable to resize the HarmonyOS NEXT HDR image texture',
+            { kind: 8 },
+          );
+        });
+      },
+    );
+  }
+
+  private releaseHdrImageTexture(
+    args: Map<string, ESObject>,
+    result: MethodResult,
+  ): void {
+    const imageId = this.numberArg(args, 'imageId', 0);
+    const textureId = this.numberArg(args, 'textureId', -1);
+    const texture = this.imageTextures.get(textureId);
+    // The Dart widget can finish an old asynchronous attach after it has been
+    // replaced. A stale release must never detach a newer image if Flutter
+    // ever reuses a texture id.
+    if (!texture || imageId <= 0 || texture.imageId !== imageId) {
+      result.success(null);
+      return;
+    }
+    const nativePromise = erikaImageNative.nativeDetachHdrImageSurface(
+      texture.imageId,
+      texture.surfaceGeneration,
+    );
+    nativePromise.then(
+      (_response: ErikaImageNativeResponse): void => {
+        this.removeImageTexture(texture);
+        result.success(null);
+      },
+      (_error: ESObject): void => {
+        // Destruction may have won the race. The Flutter texture still belongs
+        // to this bridge and must be released exactly once.
+        this.removeImageTexture(texture);
+        result.success(null);
+      },
+    );
+  }
+
+  private async createImageTexture(
+    imageId: number,
+    width: number,
+    height: number,
+    scale: number,
+    preferHdr: boolean,
+    presentation: string,
+  ): Promise<ErikaImageTextureAttachment> {
+    const registry = this.binding?.getTextureRegistry();
+    if (!registry) {
+      throw new Error('TextureRegistry is unavailable');
+    }
+    const textureId = registry.getTextureId();
+    const entry = registry.registerTexture(textureId);
+    registry.setTextureBufferSize(textureId, width, height);
+    const texture: ErikaImageTexture = {
+      textureId: textureId,
+      entry: entry,
+      surfaceId: entry.getSurfaceId(),
+      width: width,
+      height: height,
+      scale: scale,
+      imageId: imageId,
+      surfaceGeneration: this.nextImageSurfaceGeneration++,
+      presentation: presentation,
+    };
+    try {
+      const response = await erikaImageNative.nativeAttachHdrImageSurface(
+        imageId,
+        texture.surfaceId,
+        texture.surfaceGeneration,
+        width,
+        height,
+        scale,
+        preferHdr,
+      );
+      if (!response.ok) {
+        throw new Error(response.error ?? 'Unable to attach static image surface');
+      }
+      this.imageTextures.set(textureId, texture);
+      this.imageTextureByImageId.set(imageId, textureId);
+      return {
+        texture: texture,
+        outputStatus: response.value ?? {},
+      };
+    } catch (error) {
+      registry.unregisterTexture(textureId);
+      // Do not report an attach failure until the retained native session has
+      // released its one static-surface slot; Dart can then immediately start
+      // the explicit SDR fallback without racing the old image.
+      await this.destroyImageAfterSurfaceFailure(imageId);
+      throw error;
+    }
+  }
+
+  private imagePayload(
+    metadata: ErikaImageMetadataValue,
+    presentation: string,
+    imageId: number,
+    textureId: number,
+    width: number,
+    height: number,
+  ): ESObject {
+    const payload: ESObject = {
+      presentation: presentation,
+      sourceWidth: metadata.width,
+      sourceHeight: metadata.height,
+      sourceDynamicRange: metadata.sourceDynamicRange,
+    };
+    if (presentation === 'hdr') {
+      payload.imageId = imageId;
+    } else {
+      payload.textureId = textureId;
+      payload.width = width;
+      payload.height = height;
+    }
+    return payload;
+  }
+
+  private removeImageTextureForImage(imageId: number): void {
+    const textureId = this.imageTextureByImageId.get(imageId);
+    if (textureId === undefined) {
+      return;
+    }
+    const texture = this.imageTextures.get(textureId);
+    if (texture !== undefined) {
+      this.removeImageTexture(texture);
+    } else {
+      this.imageTextureByImageId.delete(imageId);
+    }
+  }
+
+  private removeImageTexture(texture: ErikaImageTexture): void {
+    const textureId = texture.textureId;
+    if (this.imageTextures.get(textureId) === texture) {
+      this.imageTextures.delete(textureId);
+    }
+    if (this.imageTextureByImageId.get(texture.imageId) === textureId) {
+      this.imageTextureByImageId.delete(texture.imageId);
+    }
+    this.binding?.getTextureRegistry()?.unregisterTexture(textureId);
+  }
+
+  private async destroyImageAfterSurfaceFailure(imageId: number): Promise<void> {
+    try {
+      await erikaImageNative.nativeDestroyHdrImage(imageId);
+    } catch (_) {
+      // Native teardown is still authoritative during an engine shutdown or a
+      // concurrent caller disposal. Local texture/map cleanup is idempotent.
+    }
+    this.removeImageTextureForImage(imageId);
+    this.imageIds.delete(imageId);
+  }
+
+  private destroyImageQuietly(imageId: number): void {
+    if (imageId <= 0) {
+      return;
+    }
+    this.imageIds.delete(imageId);
+    const operation = erikaImageNative.nativeDestroyHdrImage(
+      imageId,
+    );
+    operation.catch((): void => {});
   }
 
   private createPlayer(args: Map<string, ESObject>, result: MethodResult): void {
