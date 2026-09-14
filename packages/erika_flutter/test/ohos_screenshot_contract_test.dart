@@ -15,7 +15,7 @@ void main() {
     expect(plugin, contains('erikaNative.nativeCaptureFrame('));
     expect(plugin, contains('as Uint8Array | null'));
 
-    expect(nativeBridge, contains('napi_value NativeCaptureFrame('));
+    expect(nativeBridge, contains('Operation::Capture'));
     expect(
       nativeBridge,
       contains('erika_presenter_capture_frame_rgba('),
@@ -24,7 +24,7 @@ void main() {
     expect(nativeBridge, contains('napi_create_typedarray('));
     expect(
       nativeBridge,
-      contains('{"nativeCaptureFrame", nullptr, NativeCaptureFrame'),
+      contains('{"nativeCaptureFrame", Operation::Capture, "nnn"}'),
     );
   });
 
@@ -47,7 +47,7 @@ void main() {
     }
     expect(
       nativeBridge,
-      contains('napi_value NativeRegisterSubtitleMemoryFont('),
+      contains('Operation::Font'),
     );
     expect(
       nativeBridge,
@@ -56,8 +56,7 @@ void main() {
     expect(
       nativeBridge,
       contains(
-        '{"nativeRegisterSubtitleMemoryFont", nullptr, '
-        'NativeRegisterSubtitleMemoryFont',
+        '{"nativeRegisterSubtitleMemoryFont", Operation::Font, "nb"}',
       ),
     );
   });

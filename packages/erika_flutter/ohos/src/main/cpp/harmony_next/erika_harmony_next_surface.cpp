@@ -235,6 +235,10 @@ void ErikaHarmonyNextFrameDriver::OnFrame(
     long long timestamp,
     long long target_timestamp,
     void* data) {
+  // Never wait for a worker that may be stopping this DisplaySoloist. Acquire
+  // before dereferencing callback-owned data, and skip frames during commands.
+  std::unique_lock<std::mutex> lock(ErikaOhosPresenterMutex(), std::try_to_lock);
+  if (!lock.owns_lock()) return;
   auto* driver = static_cast<ErikaHarmonyNextFrameDriver*>(data);
   if (driver == nullptr ||
       !driver->running_.load(std::memory_order_acquire)) {

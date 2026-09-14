@@ -2,11 +2,14 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include <native_window/external_window.h>
 
 #include "erika.h"
+
+std::mutex& ErikaOhosPresenterMutex();
 
 struct ErikaHarmonyNextSurfaceState {
   bool known = false;

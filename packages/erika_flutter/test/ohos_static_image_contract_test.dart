@@ -129,8 +129,8 @@ void main() {
         plugin.indexOf('onAttachedToAbility'),
       );
       expect(
-        detached.indexOf('this.destroyImageQuietly(texture.imageId);'),
-        lessThan(detached.indexOf('unregisterTexture(textureId)')),
+        detached.indexOf('await erikaImageNative.nativeDestroyHdrImage(imageId);'),
+        lessThan(detached.indexOf('unregisterTexture(texture.textureId)')),
       );
     },
   );

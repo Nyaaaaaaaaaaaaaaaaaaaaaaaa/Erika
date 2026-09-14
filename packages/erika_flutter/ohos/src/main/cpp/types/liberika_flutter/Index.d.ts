@@ -1,13 +1,14 @@
-export const nativeCreate: (outputMode: number, headroom: number, upscaler: number) => number;
-export const nativeLastError: () => string | null;
-export const nativeDestroy: (playerId: number) => void;
-export const nativeInvoke: (playerId: number, method: string, argumentsJson: string) => string;
-export const nativeAttachSurface: (playerId: number, surfaceId: number, width: number, height: number, scale: number) => number;
-export const nativeResizeSurface: (playerId: number, width: number, height: number, scale: number) => number;
-export const nativeDetachSurface: (playerId: number) => number;
-export const nativeRenderTick: (playerId: number, timeSeconds: number) => string;
-export const nativePollEvent: (playerId: number) => string | null;
-export const nativeGetHdrCapabilitiesJson: (playerId: number) => string;
+export const nativeCreate: (outputMode: number, headroom: number, upscaler: number) => Promise<number>;
+export const nativeDestroy: (playerId: number) => Promise<void>;
+export const nativeInvoke: (playerId: number, method: string, args: string) => Promise<string>;
+export const nativeRegisterSubtitleMemoryFont: (playerId: number, bytes: Uint8Array) => Promise<Array<number>>;
+export const nativeAttachSurface: (playerId: number, surfaceId: number, width: number, height: number, scale: number) => Promise<number>;
+export const nativeResizeSurface: (playerId: number, width: number, height: number, scale: number) => Promise<number>;
+export const nativeDetachSurface: (playerId: number) => Promise<number>;
+export const nativeRenderTick: (playerId: number, timestamp: number) => Promise<string>;
+export const nativePollEvent: (playerId: number) => Promise<string | null>;
+export const nativeGetHdrCapabilitiesJson: (playerId: number) => Promise<string>;
+export const nativeCaptureFrame: (playerId: number, width: number, height: number) => Promise<Uint8Array | null>;
 
 export interface ErikaNativeImageMetadata {
   width: number;
