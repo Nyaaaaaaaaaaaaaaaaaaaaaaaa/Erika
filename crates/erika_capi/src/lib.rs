@@ -704,6 +704,18 @@ fn image_decode_cancellations() -> &'static Mutex<ImageDecodeCancellations> {
     })
 }
 
+/// Returns a process-wide positive signed-64-bit static-image operation ID.
+/// Zero means exhausted, keeping every result representable by Dart `int`.
+#[unsafe(no_mangle)]
+pub extern "C" fn erika_image_allocate_operation_id() -> u64 {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+            (id < i64::MAX as u64).then_some(id + 1)
+        })
+        .unwrap_or(0)
+}
+
 fn register_image(image: DecodedImage) -> Result<ErikaImageHandle, String> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -5348,6 +5360,27 @@ fn audio_recovery_state_to_c(state: AudioRecoveryState) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_image_operation_ids_are_unique_across_threads() {
+        let ids: Vec<u64> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (0..128)
+                            .map(|_| erika_image_allocate_operation_id())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap())
+                .collect()
+        });
+        assert!(ids.iter().all(|id| *id != 0));
+        assert_eq!(ids.iter().copied().collect::<HashSet<_>>().len(), ids.len());
+    }
 
     #[test]
     fn c_event_counts_tracks() {

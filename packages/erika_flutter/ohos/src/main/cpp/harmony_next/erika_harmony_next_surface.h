@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
-#include <string>
 
 #include <native_window/external_window.h>
 
@@ -11,27 +10,9 @@
 
 std::mutex& ErikaOhosPresenterMutex();
 
-struct ErikaHarmonyNextSurfaceState {
-  bool known = false;
-  bool hdr_requested = false;
-  bool hdr_surface_supported = false;
-  bool ten_bit_surface_supported = false;
-  bool hdr_metadata_configured = false;
-  bool native_vsync_supported = false;
-  int32_t native_color_space = -1;
-  int32_t fallback_reason = ErikaOutputFallbackReason_None;
-};
-
-// Configures and verifies the NativeWindow contract before wgpu creates its
-// swapchain. On failure the function restores an explicit RGBA8888/sRGB
-// contract and leaves an inspectable fallback reason in `state`.
-bool ErikaHarmonyNextConfigureSurface(
-    OHNativeWindow* window,
-    bool request_hdr,
-    ErikaHarmonyNextSurfaceState* state);
-
-std::string ErikaHarmonyNextCapabilitiesJson(
-    const ErikaHarmonyNextSurfaceState& state);
+// Configures the NativeWindow for SDR before wgpu creates its swapchain.
+// Returns the reported native color space, or -1 when it cannot be read.
+int32_t ErikaHarmonyNextConfigureSdrSurface(OHNativeWindow* window);
 
 class ErikaHarmonyNextFrameDriver {
  public:

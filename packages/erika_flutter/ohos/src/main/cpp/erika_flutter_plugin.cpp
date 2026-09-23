@@ -1,5 +1,4 @@
 #include "include/erika_flutter/erika_flutter_plugin.h"
-#include "include/erika_flutter/erika_flutter_image.h"
 
 #include <napi/native_api.h>
 #include <native_window/external_window.h>
@@ -26,15 +25,13 @@ namespace {
 struct OhosPlayer {
   ErikaPresenterHandle* presenter = nullptr;
   OHNativeWindow* window = nullptr;
-  bool hdr_requested = false;
-  ErikaHarmonyNextSurfaceState surface_state;
   std::unique_ptr<ErikaHarmonyNextFrameDriver> frame_driver;
 };
 std::unordered_map<int64_t, OhosPlayer> g_players;
 int64_t g_next_player_id = 1;
 
 enum class Operation {
-  Create, Destroy, Invoke, Font, Attach, Resize, Detach, Render, Poll, Capabilities, Capture
+  Create, Destroy, Invoke, Font, Attach, Resize, Detach, Render, Poll, Capture
 };
 struct Method {
   const char* name;
@@ -43,7 +40,7 @@ struct Method {
   const char* signature;
 };
 const Method kMethods[] = {
-    {"nativeCreate", Operation::Create, "nnn"},
+    {"nativeCreate", Operation::Create, "n"},
     {"nativeDestroy", Operation::Destroy, "n"},
     {"nativeInvoke", Operation::Invoke, "nss"},
     {"nativeRegisterSubtitleMemoryFont", Operation::Font, "nb"},
@@ -52,7 +49,6 @@ const Method kMethods[] = {
     {"nativeDetachSurface", Operation::Detach, "n"},
     {"nativeRenderTick", Operation::Render, "nn"},
     {"nativePollEvent", Operation::Poll, "n"},
-    {"nativeGetHdrCapabilitiesJson", Operation::Capabilities, "n"},
     {"nativeCaptureFrame", Operation::Capture, "nnn"},
 };
 struct Request {
@@ -109,14 +105,13 @@ void Execute(napi_env, void* data) {
   const auto* n = request.numbers;
   if (op == Operation::Create) {
     ErikaPresenterConfig config = {};
-    config.output_mode = n[0] == 0 ? 0 : 2;
-    config.edr_headroom = static_cast<float>(n[1]);
-    config.luma_upscaler = static_cast<int32_t>(n[2]);
+    config.output_mode = 0;
+    config.edr_headroom = 1.0f;
+    config.luma_upscaler = static_cast<int32_t>(n[0]);
     auto* presenter = erika_presenter_create_with_config(config);
     if (presenter == nullptr) { Fail(request, "Presenter creation failed"); return; }
     OhosPlayer player;
     player.presenter = presenter;
-    player.hdr_requested = n[0] != 0;
     player.frame_driver.reset(new (std::nothrow) ErikaHarmonyNextFrameDriver());
     if (!player.frame_driver) {
       request.error = "Frame driver allocation failed";
@@ -164,13 +159,13 @@ void Execute(napi_env, void* data) {
         request.error = "Native window creation failed";
         break;
       }
-      ErikaHarmonyNextConfigureSurface(window, player.hdr_requested, &player.surface_state);
+      const int32_t native_color_space = ErikaHarmonyNextConfigureSdrSurface(window);
       ErikaSurfaceOutputCapabilities capabilities = {};
-      capabilities.extended_linear = player.surface_state.hdr_surface_supported;
+      capabilities.extended_linear = false;
       capabilities.direct_composition = true;
-      capabilities.desired_headroom = player.surface_state.hdr_surface_supported ? 4.0f : 1.0f;
-      capabilities.fallback_reason = player.surface_state.fallback_reason;
-      capabilities.native_data_space = player.surface_state.native_color_space;
+      capabilities.desired_headroom = 1.0f;
+      capabilities.fallback_reason = 0;
+      capabilities.native_data_space = native_color_space;
       if (!CheckStatus(request, erika_presenter_attach_wgpu_surface_with_output_capabilities(
           player.presenter, ErikaWgpuSurfaceKind_OhosNativeWindow,
           static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window)), 0,
@@ -180,13 +175,10 @@ void Execute(napi_env, void* data) {
       }
       player.window = window;
       if (!player.frame_driver->Start(player.presenter)) {
-        player.surface_state.native_vsync_supported = false;
-        player.surface_state.fallback_reason = ErikaOutputFallbackReason_NativeVsyncUnavailable;
         request.error = "Native vsync unavailable";
         ReleaseWindow(player);
         break;
       }
-      player.surface_state.native_vsync_supported = true;
       break;
     }
     case Operation::Resize:
@@ -200,7 +192,6 @@ void Execute(napi_env, void* data) {
         OH_NativeWindow_DestroyNativeWindow(player.window);
         player.window = nullptr;
       }
-      player.surface_state = {};
       break;
     case Operation::Render:
       request.text = TakeString(erika_presenter_render_tick_json(player.presenter, n[1]));
@@ -214,10 +205,6 @@ void Execute(napi_env, void* data) {
       }
       break;
     }
-    case Operation::Capabilities:
-      request.text = ErikaHarmonyNextCapabilitiesJson(player.surface_state);
-      request.kind = Request::Kind::String;
-      break;
     case Operation::Capture: {
       if (n[1] <= 0 || n[2] <= 0 || n[1] > INT32_MAX || n[2] > INT32_MAX) break;
       const auto width = static_cast<uint32_t>(n[1]);
@@ -340,9 +327,6 @@ napi_value Init(napi_env env, napi_value exports) {
     if (napi_define_properties(env, exports, 1, &descriptor) != napi_ok) {
       return nullptr;
     }
-  }
-  if (ErikaFlutterDefineImageExports(env, exports) != napi_ok) {
-    return nullptr;
   }
   return exports;
 }

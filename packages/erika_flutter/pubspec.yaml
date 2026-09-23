@@ -1,5 +1,5 @@
 name: erika_flutter
-description: Flutter HDR AV1 video and static AVIF/HEIF/JPEG player powered by Erika, with system media controls.
+description: Flutter SDR AV1 video and static AVIF/HEIF/JPEG player powered by Erika, with system media controls.
 version: 0.2.0
 
 homepage: https://github.com/Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika
@@ -12,13 +12,14 @@ topics:
   - media-player
   - ffmpeg
   - rust
-  - hdr
+  - avif
 
 environment:
   sdk: ">=3.11.0 <4.0.0"
   flutter: ">=3.41.9"
 
 dependencies:
+  ffi: ^2.2.0
   flutter:
     sdk: flutter
   flutter_plugin_android_lifecycle: ^2.0.26

@@ -52,7 +52,7 @@ use crate::overlay::OverlayFrame;
 use crate::renderer::d3d11_artcnn::D3d11ArtCnn;
 use crate::renderer::metal::{MetalRendererConfig, VideoAlphaMode};
 use crate::renderer::output::{
-    ActiveOutputEncoding, DynamicRange, OutputFallbackReason, OutputRuntimeStatus,
+    ActiveOutputEncoding, DynamicRange, OutputFallbackReason, OutputMode, OutputRuntimeStatus,
     OutputSurfaceFormat,
 };
 use crate::renderer::pipeline::{
@@ -715,6 +715,11 @@ impl D3d11OutputMode {
     }
 }
 
+fn hdr10_output_requested(requested: OutputMode, source: SourceColorState) -> bool {
+    matches!(source.transfer, TransferFunction::Pq)
+        && requested.resolve_for_source(source.is_hdr()).is_edr()
+}
+
 #[derive(Clone)]
 struct D3d11OverlayTexture {
     _texture: ID3D11Texture2D,
@@ -942,7 +947,7 @@ impl D3d11Renderer {
             }
             return Ok(D3d11OutputMode::Sdr);
         }
-        if matches!(source.transfer, TransferFunction::Pq)
+        if hdr10_output_requested(self.requested_output_mode, source)
             && self.try_enable_hdr10_output(source)?
         {
             self.stats.hdr10_output_frames += 1;
@@ -3032,6 +3037,34 @@ mod tests {
         assert_eq!(stats.hdr10_output_frames, 2);
         assert_eq!(stats.sdr_tonemap_frames, 1);
         assert!(stats.hdr10_output_active);
+    }
+
+    #[test]
+    fn sdr_request_never_promotes_pq_video_to_hdr10_output() {
+        let pq = SourceColorState::new(ColorPrimaries::Bt2020, TransferFunction::Pq);
+        let hlg = SourceColorState::new(ColorPrimaries::Bt2020, TransferFunction::Hlg);
+
+        assert!(!hdr10_output_requested(OutputMode::Sdr, pq));
+        assert!(!hdr10_output_requested(OutputMode::auto(1.0), pq));
+        assert!(hdr10_output_requested(OutputMode::auto(4.0), pq));
+        assert!(hdr10_output_requested(OutputMode::extended_linear(4.0), pq));
+        assert!(!hdr10_output_requested(
+            OutputMode::extended_linear(4.0),
+            hlg
+        ));
+
+        let mut renderer = D3d11Renderer::with_config(MetalRendererConfig {
+            output_mode: OutputMode::Sdr,
+            ..MetalRendererConfig::default()
+        })
+        .unwrap();
+        assert_eq!(
+            renderer.select_output_mode_for_source(pq).unwrap(),
+            D3d11OutputMode::Sdr
+        );
+        assert_eq!(renderer.stats.hdr_source_frames, 1);
+        assert_eq!(renderer.stats.sdr_tonemap_frames, 1);
+        assert_eq!(renderer.stats.hdr10_output_frames, 0);
     }
 
     #[test]

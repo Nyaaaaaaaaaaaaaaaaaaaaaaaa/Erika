@@ -47,6 +47,7 @@ Pod::Spec.new do |s|
     erika_presenter_track_selection
     erika_presenter_tracks
     erika_image_attach_wgpu_surface
+    erika_image_allocate_operation_id
     erika_image_cancel_decode
     erika_image_decode_uri
     erika_image_decode_uri_sized
@@ -59,6 +60,8 @@ Pod::Spec.new do |s|
     erika_image_render_surface
     erika_image_resize_surface
     erika_image_rgba_free
+    erika_last_error_message
+    erika_string_free
     erika_track_info_free
     erika_subtitle_memory_font_status_free
   ]
@@ -195,6 +198,7 @@ if [ ! -f "$OUTPUT_LIB" ]; then
 fi
 for ERIKA_IMAGE_SYMBOL in \
   erika_image_attach_wgpu_surface \
+  erika_image_allocate_operation_id \
   erika_image_cancel_decode \
   erika_image_decode_uri \
   erika_image_decode_uri_sized \
@@ -206,7 +210,9 @@ for ERIKA_IMAGE_SYMBOL in \
   erika_image_render_sdr_rgba \
   erika_image_render_surface \
   erika_image_resize_surface \
-  erika_image_rgba_free
+  erika_image_rgba_free \
+  erika_last_error_message \
+  erika_string_free
 do
   if ! xcrun nm -gU "$OUTPUT_LIB" | grep -q "_$ERIKA_IMAGE_SYMBOL"; then
     echo "error: Erika iOS runtime is missing $ERIKA_IMAGE_SYMBOL" >&2

@@ -337,14 +337,6 @@ private struct ErikaPresenterConfigC {
   var videoAlphaMode: Int32 = 0
 
   static let sdr = ErikaPresenterConfigC()
-
-  static func appleEdr(headroom: Float) -> ErikaPresenterConfigC {
-    ErikaPresenterConfigC(outputMode: 1, edrHeadroom: max(1.0, headroom))
-  }
-
-  static func auto(headroom: Float) -> ErikaPresenterConfigC {
-    ErikaPresenterConfigC(outputMode: 3, edrHeadroom: max(1.0, headroom))
-  }
 }
 
 private struct ErikaSubtitleStyleC {
@@ -3396,96 +3388,12 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     commands.nextTrackCommand.isEnabled = enabled && capabilities?.nextEnabled == true
   }
 
-  private func presenterConfigForNewPlayer(arguments: Any?) throws -> ErikaPresenterConfigC {
+  private func presenterConfigForNewPlayer(arguments: Any?) -> ErikaPresenterConfigC {
     let alphaMode = (arguments as? [String: Any])
       .flatMap { int32Value($0["videoAlphaMode"]) } ?? 0
-    if let args = arguments as? [String: Any],
-       let explicitMode = int32Value(args["outputMode"]) {
-      let headroom = floatValue(args["edrHeadroom"]) ?? 4.0
-      var config: ErikaPresenterConfigC
-      switch explicitMode {
-      case 1:
-        config = .appleEdr(headroom: headroom)
-      case 2:
-        config = ErikaPresenterConfigC(outputMode: 2, edrHeadroom: max(1.0, headroom))
-      case 3:
-        config = .auto(headroom: headroom)
-      default:
-        config = .sdr
-      }
-      config.videoAlphaMode = alphaMode
-      return config
-    }
-
-    let headroom = resolvedEdrHeadroom()
-    NSLog("ErikaFlutterPlugin: using automatic Apple output, headroom \(headroom)x")
-    let config = ErikaPresenterConfigC.auto(headroom: headroom)
-    var alphaConfig = config
-    alphaConfig.videoAlphaMode = alphaMode
-    return alphaConfig
-  }
-
-  private func resolvedEdrHeadroom() -> Float {
-    let environment = ProcessInfo.processInfo.environment
-    if boolEnvironmentFlag("ERIKA_DISABLE_EDR", environment: environment) {
-      return 1.0
-    }
-    if let override = floatEnvironmentValue("ERIKA_EDR_HEADROOM", environment: environment),
-       override > 1.0 {
-      return override
-    }
-
-    let screenHeadroom = currentScreenEdrHeadroom()
-    if screenHeadroom > 1.0 {
-      return screenHeadroom
-    }
-    if boolEnvironmentFlag("ERIKA_ENABLE_EDR", environment: environment) {
-      return 4.0
-    }
-    return 1.0
-  }
-
-  private func currentScreenEdrHeadroom() -> Float {
-    let screen = flutterHostView?.window?.screen ??
-      flutterHostViewController?.view.window?.screen ??
-      NSApp.keyWindow?.screen ??
-      NSApp.mainWindow?.screen ??
-      NSScreen.main
-    guard let screen else {
-      return 1.0
-    }
-
-    let key = "maximumPotentialExtendedDynamicRangeColorComponentValue"
-    guard screen.responds(to: Selector((key))),
-          let number = screen.value(forKey: key) as? NSNumber else {
-      return 1.0
-    }
-    return max(1.0, number.floatValue)
-  }
-
-  private func boolEnvironmentFlag(
-    _ name: String,
-    environment: [String: String]
-  ) -> Bool {
-    switch environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-    case "1", "true", "yes", "on":
-      return true
-    default:
-      return false
-    }
-  }
-
-  private func floatEnvironmentValue(
-    _ name: String,
-    environment: [String: String]
-  ) -> Float? {
-    guard let raw = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !raw.isEmpty,
-          let value = Float(raw),
-          value.isFinite else {
-      return nil
-    }
-    return value
+    var config = ErikaPresenterConfigC.sdr
+    config.videoAlphaMode = alphaMode
+    return config
   }
 
   private func int32Value(_ value: Any?) -> Int32? {

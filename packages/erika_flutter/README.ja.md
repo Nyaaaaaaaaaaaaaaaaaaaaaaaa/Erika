@@ -10,7 +10,7 @@ Erika メディア再生エンジン向けの Flutter plugin です。
 この plugin は Dart を hot path から外します。
 
 - Dart は低頻度の player command と event stream だけを公開します。
-- native plugin は 2 種類の surface を提供します。推奨は `ErikaWindowOverlayVideoView`（macOS/iOS/tvOS は Metal、Windows は D3D11 swapchain）、platform view 用は `ErikaVideoView` です。Android では両方が同じ native-view selector を使い、SDR は実体のある `TextureView`、extended-linear request は Hybrid Composition `SurfaceView` になります。
+- native plugin は 2 種類の surface を提供します。推奨は `ErikaWindowOverlayVideoView`（macOS/iOS/tvOS は Metal、Windows は D3D11 swapchain）、platform view 用は `ErikaVideoView` です。Android video は native `TextureView` を使います。
 - macOS plugin は Erika の dynamic library を読み込みます。
 - iOS plugin は Erika の static library を link します。
 - tvOS plugin は Erika の static library を link し、Apple TV platform view で Metal layer を host します。
@@ -25,7 +25,7 @@ Erika メディア再生エンジン向けの Flutter plugin です。
 
 Windows では `ErikaWindowOverlayVideoView` が window-level の Direct3D 11 swapchain を sibling surface として host し、同じ overlay モデルに従います。
 
-標準的な Flutter platform view が必要な場合は `ErikaVideoView` を使います。Android の SDR video surface は native `TextureView` です。`ErikaOutputMode.extendedLinear` player は `PlatformViewLink`/Hybrid Composition の `SurfaceView` を作ります。scRGB を Flutter texture-layer composition に通さないためです。plugin は borrowed `Surface`、lifecycle、resize、audio focus、HDR eligibility、vsync tick を Erika に接続します。
+標準的な Flutter platform view が必要な場合は `ErikaVideoView` を使います。Android video surface は native `TextureView` です。plugin は borrowed `Surface`、lifecycle、resize、audio focus、vsync tick を Erika に接続します。
 
 ## macOS Setup
 
@@ -188,12 +188,8 @@ Android の `content://` media/subtitle URI は `ContentResolver` で開いて d
 
 Android は MediaSession と media notification を使って lock screen、Bluetooth、system media control に接続します。`allowBackgroundPlayback: true` の場合は `mediaPlayback` foreground Service を起動し、video decode を停止したままバックグラウンドで音声を継続します。plugin Manifest には foreground service と Android 13+ の notification permission が宣言されていますが、host app は product flow に応じて `POST_NOTIFICATIONS` runtime permission を要求する必要があります。permission が拒否された場合も media session は動作しますが、notification の表示は Android version と system policy に依存します。
 
-Android minimum は API 26 のままです。Extended-linear は native-window dataspace API
-（API 28+）も必要で、API 26/27 は SDR playback を継続して該当 fallback を報告します。
-API 34+ では plugin が `Display.registerHdrSdrRatioChangedListener` を監視し、実際の ratio
-change を Erika に publish します。wgpu は surface を reattach せず後続 frame target と
-output status を更新します。API 35 では host の global Window を変更せず、`SurfaceView`
-ごとに desired HDR headroom も設定します。
+Android minimum は API 26 のままです。対応する API level では video output を
+SDR に統一します。
 
 ## HarmonyOS Setup
 
@@ -213,7 +209,10 @@ capability のみを照会し、coded size を検証してから返された cod
 を作成します。system 推奨の software AVCodec は選択せず、capability 不在、size
 非対応、open/runtime failure の場合は直接 dav1d へ fallback します。Surface output
 は NativeBuffer/Vulkan、AVCodec buffer output と dav1d は CPU upload を使います。
-static AVIF も同じ方針です。
+この hardware 方針は video のみです。static AVIF は別の software decode で
+SDR RGBA を生成し、`ErikaFileImage` を Flutter の `Image` に渡して表示します。
+static HDR surface は提供しません。`maximumDecodeExtent` で decode 後の物理
+サイズを制限し、download と disk cache は application 側で管理します。
 
 ## HTTP ヘッダー
 
@@ -258,83 +257,9 @@ await player.open(
 0.1.7 以前の native library には options entry point がないため、この設定を指定すると
 黙って破棄せず、説明付きの error を throw します。
 
-## Output Mode
+## SDR Video Output
 
-`ErikaOutputMode.preferHdr` は利用可能な最良の HDR 出力を求める cross-platform request
-です。Erika はこれを一度だけ解決し、native player の作成と Flutter video surface で同じ
-output contract を使います。Android は Hybrid Composition の FP16 extended-linear scRGB
-`SurfaceView`、Apple は Apple EDR になります。
-
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.preferHdr,
-  edrHeadroom: 4.0,
-);
-```
-
-`ErikaOutputMode.sdr` で SDR 出力を強制できます。platform-specific の `appleEdr` と
-`extendedLinear` は custom host との compatibility のため残りますが、通常の app は
-`auto`、`preferHdr`、`sdr` を使ってください。
-
-Android の high-headroom mode は FP16 **extended-linear scRGB** で、HDR10/PQ ではありません。
-
-`edrHeadroom` は content-headroom ceiling です。extended-linear player で省略すると Erika
-は default 4x content ceiling を使い、`SurfaceView` の desired headroom は `0`（system auto）
-になります。明示値は API 35 の per-`SurfaceView` desired headroom にも使います。current
-display HDR/SDR ratio が available なら wgpu effective target をさらに制限します。
-
-display/surface が HDR capable、view が Hybrid Composition `SurfaceView`、wgpu が Vulkan、
-surface が `Rgba16Float` を公開し、configured native window の readback が
-`ADATASPACE_SCRGB_LINEAR`（`406913024`、`0x18410000`）の場合だけ active になります。
-GLES、`TextureView`、FP16 不在、dataspace verification failure は SDR に明示 fallback します。
-Android scRGB は BT.709 primaries、`1.0 = 80 nit` で、PQ/HDR10 metadata は使いません。
-
-request ではなく negotiated state を必ず確認します。
-
-```dart
-final status = await player.getOutputStatus();
-if (!status.extendedLinearActive) {
-  debugPrint(
-    'Erika output fallback: '
-    '${status.fallbackReason.label} (${status.fallbackReason.nativeValue})',
-  );
-}
-```
-
-`ErikaOutputStatus` の 13 field は `requestedMode`、`activeEncoding`、
-`surfaceFormat`、`nativeDataSpace`、`requestedHeadroom`、`activeHeadroom`、
-`activeHeadroomKnown`、`extendedLinearActive`、`fallbackReason`、
-`fallbackCount`、`dataSpaceFailures`、`headroomUpdates`、
-`extendedLinearFrames` です。active Android scRGB は
-`androidExtendedLinearScRgb + sixteenBitFloat + nativeDataSpace 406913024` です。
-API 34+ で Android が valid ratio を公開すると、`activeHeadroom` は current display HDR/SDR
-ratio、`activeHeadroomKnown` は true です。ratio unavailable の場合、この値は fallback
-のみで `activeHeadroomKnown` は false です。known state または ratio が実際に変わった
-場合だけ `headroomUpdates` が増え、duplicate listener notification は無視されます。
-
-`ErikaOutputFallbackReason` は stable ABI code です。
-
-| Code | Dart value | Stable label |
-|------|------------|--------------|
-| 0 | `none` | `none` |
-| 1 | `displayHdrUnsupported` | `display_hdr_unsupported` |
-| 2 | `hybridCompositionRequired` | `hybrid_composition_required` |
-| 3 | `wgpuBackendNotVulkan` | `wgpu_backend_not_vulkan` |
-| 4 | `rgba16FloatSurfaceFormatUnavailable` | `rgba16float_surface_format_unavailable` |
-| 5 | `nativeWindowDataSpaceApiUnavailable` | `native_window_dataspace_api_unavailable` |
-| 6 | `scrgbDataSpaceVerificationFailed` | `scrgb_dataspace_verification_failed` |
-| 7 | `surfaceConfigureFailed` | `surface_configure_failed` |
-| 8 | `legacyAppleEdrUnsupported` | `legacy_apple_edr_unsupported` |
-
-`player.screenshot()` は current composited frame（video + subtitle + danmaku）の raw SDR
-RGBA8 を返し、display が Apple EDR / Android extended-linear の場合も SDR のままです。
-Metal と Android/wgpu は capture 実装済みですが、現在の Windows D3D11 Flutter path は
-screenshot byte を返しません。
-
-non-HDR emulator/device coverage は明示的 SDR fallback と reason を検証します。Active
-extended-linear はまだ実機検証済みとは claim せず、API 35 HDR device で
-`Rgba16Float + SCRGB_LINEAR`、live HDR/SDR-ratio update、rotation/background recovery、
-multiple player、SDR screenshot の acceptance が必要です。
+`ErikaPlayer` は常に native SDR 出力を要求します。HDR encoded AV1 source も source colour metadata に従って decode し、SDR に tone-map して再生します。Android は通常の `erika_flutter/video_view` TextureView を使います。Flutter API に HDR output mode、headroom、HDR capability switch はありません。
 
 ## Upscaler
 

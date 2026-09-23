@@ -222,62 +222,6 @@ class AndroidSurfaceLifecycleTest {
     }
 
     @Test
-    fun `successful attached recovery resumes hdr headroom observation`() {
-        assertTrue(
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = true,
-                surfaceAttached = true,
-                disposed = false,
-                disposeRequested = false,
-                unbindRequested = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `recovery does not resume hdr observation without a live attached binding`() {
-        val inactiveStates = listOf(
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = false,
-                surfaceAttached = true,
-                disposed = false,
-                disposeRequested = false,
-                unbindRequested = false,
-            ),
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = true,
-                surfaceAttached = false,
-                disposed = false,
-                disposeRequested = false,
-                unbindRequested = false,
-            ),
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = true,
-                surfaceAttached = true,
-                disposed = true,
-                disposeRequested = false,
-                unbindRequested = false,
-            ),
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = true,
-                surfaceAttached = true,
-                disposed = false,
-                disposeRequested = true,
-                unbindRequested = false,
-            ),
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = true,
-                surfaceAttached = true,
-                disposed = false,
-                disposeRequested = false,
-                unbindRequested = true,
-            ),
-        )
-
-        assertTrue(inactiveStates.all { shouldRefresh -> !shouldRefresh })
-    }
-
-    @Test
     fun `pending view bind resumes only for a live host and target`() {
         assertTrue(
             androidShouldResumePendingViewBind(

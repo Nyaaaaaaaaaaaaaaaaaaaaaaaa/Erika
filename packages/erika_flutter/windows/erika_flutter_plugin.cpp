@@ -2781,12 +2781,6 @@ int64_t ErikaFlutterPlugin::CreatePlayer(const EncodableValue* arguments) {
 
   if (arguments != nullptr && std::holds_alternative<EncodableMap>(*arguments)) {
     const auto& args = std::get<EncodableMap>(*arguments);
-    if (auto value = Int64Value(FindArg(args, "outputMode"))) {
-      config.output_mode = static_cast<int32_t>(*value);
-    }
-    if (auto value = DoubleValue(FindArg(args, "edrHeadroom"))) {
-      config.edr_headroom = static_cast<float>(std::max(1.0, *value));
-    }
     if (auto value = Int64Value(FindArg(args, "videoAlphaMode"))) {
       config.video_alpha_mode = static_cast<int32_t>(*value);
     }

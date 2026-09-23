@@ -58,86 +58,6 @@ const int kErikaSubtitleOverrideAll =
     kErikaSubtitleOverrideMargins |
     kErikaSubtitleOverrideBlur;
 
-enum ErikaOutputMode {
-  sdr(0),
-  auto(3),
-  preferHdr(4),
-  @Deprecated('Use auto or preferHdr; platform encoding is now internal.')
-  appleEdr(1),
-  @Deprecated('Use auto or preferHdr; platform encoding is now internal.')
-  extendedLinear(2);
-
-  const ErikaOutputMode(this.nativeValue);
-
-  final int nativeValue;
-
-  static ErikaOutputMode fromNativeValue(int value) {
-    return switch (value) {
-      1 => ErikaOutputMode.appleEdr,
-      2 => ErikaOutputMode.extendedLinear,
-      3 => ErikaOutputMode.auto,
-      4 => ErikaOutputMode.preferHdr,
-      _ => ErikaOutputMode.sdr,
-    };
-  }
-}
-
-/// The native output mode and surface requirements resolved from a semantic
-/// [ErikaOutputMode] request.
-///
-/// Most applications should set [ErikaPlayer.outputMode] and use
-/// [ErikaVideoView]. Custom platform-surface hosts can use this plan to keep
-/// their surface compatible with the native player configuration.
-@immutable
-final class ErikaOutputSurfacePlan {
-  const ErikaOutputSurfacePlan._({
-    required this.requestedMode,
-    required this.nativeMode,
-    required this.requiresAndroidExtendedLinearSurface,
-  });
-
-  factory ErikaOutputSurfacePlan.forCurrentPlatform(
-    ErikaOutputMode requestedMode,
-  ) =>
-      ErikaOutputSurfacePlan.forPlatform(
-        requestedMode,
-        defaultTargetPlatform,
-      );
-
-  @visibleForTesting
-  factory ErikaOutputSurfacePlan.forPlatform(
-    ErikaOutputMode requestedMode,
-    TargetPlatform platform,
-  ) {
-    final nativeMode = switch (requestedMode) {
-      ErikaOutputMode.preferHdr => _nativeModeForPreferredHdr(platform),
-      _ => requestedMode,
-    };
-    return ErikaOutputSurfacePlan._(
-      requestedMode: requestedMode,
-      nativeMode: nativeMode,
-      requiresAndroidExtendedLinearSurface:
-          platform == TargetPlatform.android &&
-          nativeMode == ErikaOutputMode.extendedLinear,
-    );
-  }
-
-  final ErikaOutputMode requestedMode;
-  final ErikaOutputMode nativeMode;
-  final bool requiresAndroidExtendedLinearSurface;
-
-  static ErikaOutputMode _nativeModeForPreferredHdr(
-    TargetPlatform platform,
-  ) {
-    return switch (platform.name) {
-      'ohos' => ErikaOutputMode.preferHdr,
-      'android' => ErikaOutputMode.extendedLinear,
-      'iOS' || 'macOS' => ErikaOutputMode.appleEdr,
-      _ => ErikaOutputMode.auto,
-    };
-  }
-}
-
 /// How transparency is encoded in a video frame.
 enum ErikaVideoAlphaMode {
   /// The decoded video is fully opaque.
@@ -153,240 +73,6 @@ enum ErikaVideoAlphaMode {
   final int nativeValue;
 }
 
-enum ErikaActiveOutputEncoding {
-  sdrSrgb(0),
-  appleEdr(1),
-  androidExtendedLinearScRgb(2),
-  hdr10Pq(3);
-
-  const ErikaActiveOutputEncoding(this.nativeValue);
-
-  final int nativeValue;
-
-  static ErikaActiveOutputEncoding fromNativeValue(int value) {
-    return switch (value) {
-      1 => ErikaActiveOutputEncoding.appleEdr,
-      2 => ErikaActiveOutputEncoding.androidExtendedLinearScRgb,
-      3 => ErikaActiveOutputEncoding.hdr10Pq,
-      _ => ErikaActiveOutputEncoding.sdrSrgb,
-    };
-  }
-}
-
-enum ErikaOutputSurfaceFormat {
-  eightBitUnorm(0),
-  tenBitUnorm(1),
-  sixteenBitFloat(2);
-
-  const ErikaOutputSurfaceFormat(this.nativeValue);
-
-  final int nativeValue;
-
-  static ErikaOutputSurfaceFormat fromNativeValue(int value) {
-    return switch (value) {
-      1 => ErikaOutputSurfaceFormat.tenBitUnorm,
-      2 => ErikaOutputSurfaceFormat.sixteenBitFloat,
-      _ => ErikaOutputSurfaceFormat.eightBitUnorm,
-    };
-  }
-}
-
-enum ErikaOutputFallbackReason {
-  none(0, 'none'),
-  displayHdrUnsupported(1, 'display_hdr_unsupported'),
-  hybridCompositionRequired(2, 'hybrid_composition_required'),
-  wgpuBackendNotVulkan(3, 'wgpu_backend_not_vulkan'),
-  rgba16FloatSurfaceFormatUnavailable(
-    4,
-    'rgba16float_surface_format_unavailable',
-  ),
-  nativeWindowDataSpaceApiUnavailable(
-    5,
-    'native_window_dataspace_api_unavailable',
-  ),
-  scrgbDataSpaceVerificationFailed(6, 'scrgb_dataspace_verification_failed'),
-  surfaceConfigureFailed(7, 'surface_configure_failed'),
-  legacyAppleEdrUnsupported(8, 'legacy_apple_edr_unsupported'),
-  tenBitSurfaceFormatUnavailable(9, 'ten_bit_surface_format_unavailable'),
-  hdrWindowConfigurationFailed(10, 'hdr_window_configuration_failed'),
-  hdrMetadataVerificationFailed(11, 'hdr_metadata_verification_failed'),
-  nativeVsyncUnavailable(12, 'native_vsync_unavailable'),
-  unknown(-1, 'unknown');
-
-  const ErikaOutputFallbackReason(this.nativeValue, this.label);
-
-  final int nativeValue;
-  final String label;
-
-  static ErikaOutputFallbackReason fromNativeValue(int value) {
-    return switch (value) {
-      0 => ErikaOutputFallbackReason.none,
-      1 => ErikaOutputFallbackReason.displayHdrUnsupported,
-      2 => ErikaOutputFallbackReason.hybridCompositionRequired,
-      3 => ErikaOutputFallbackReason.wgpuBackendNotVulkan,
-      4 => ErikaOutputFallbackReason.rgba16FloatSurfaceFormatUnavailable,
-      5 => ErikaOutputFallbackReason.nativeWindowDataSpaceApiUnavailable,
-      6 => ErikaOutputFallbackReason.scrgbDataSpaceVerificationFailed,
-      7 => ErikaOutputFallbackReason.surfaceConfigureFailed,
-      8 => ErikaOutputFallbackReason.legacyAppleEdrUnsupported,
-      9 => ErikaOutputFallbackReason.tenBitSurfaceFormatUnavailable,
-      10 => ErikaOutputFallbackReason.hdrWindowConfigurationFailed,
-      11 => ErikaOutputFallbackReason.hdrMetadataVerificationFailed,
-      12 => ErikaOutputFallbackReason.nativeVsyncUnavailable,
-      _ => ErikaOutputFallbackReason.unknown,
-    };
-  }
-}
-
-class ErikaOutputStatus {
-  const ErikaOutputStatus({
-    required this.requestedMode,
-    required this.activeEncoding,
-    required this.surfaceFormat,
-    required this.nativeDataSpace,
-    required this.requestedHeadroom,
-    required this.activeHeadroom,
-    required this.activeHeadroomKnown,
-    required this.extendedLinearActive,
-    required this.fallbackReason,
-    required this.fallbackCount,
-    required this.dataSpaceFailures,
-    required this.headroomUpdates,
-    required this.extendedLinearFrames,
-    required this.sourceDynamicRange,
-    required this.activeDynamicRange,
-    required this.hdrOutputConfirmed,
-  });
-
-  final ErikaOutputMode requestedMode;
-  final ErikaActiveOutputEncoding activeEncoding;
-  final ErikaOutputSurfaceFormat surfaceFormat;
-  final int nativeDataSpace;
-  final double requestedHeadroom;
-  final double activeHeadroom;
-  final bool activeHeadroomKnown;
-  final bool extendedLinearActive;
-  final ErikaOutputFallbackReason fallbackReason;
-  final int fallbackCount;
-  final int dataSpaceFailures;
-  final int headroomUpdates;
-  final int extendedLinearFrames;
-  final ErikaDynamicRange sourceDynamicRange;
-  final ErikaDynamicRange activeDynamicRange;
-
-  /// True only after a decoded HDR frame has been presented by a verified HDR
-  /// output path. A resource's HDR declaration alone is insufficient.
-  final bool hdrOutputConfirmed;
-
-  factory ErikaOutputStatus.fromMap(Map<dynamic, dynamic> map) {
-    return ErikaOutputStatus(
-      requestedMode: ErikaOutputMode.fromNativeValue(
-        (map['requestedMode'] as num?)?.toInt() ?? 0,
-      ),
-      activeEncoding: ErikaActiveOutputEncoding.fromNativeValue(
-        (map['activeEncoding'] as num?)?.toInt() ?? 0,
-      ),
-      surfaceFormat: ErikaOutputSurfaceFormat.fromNativeValue(
-        (map['surfaceFormat'] as num?)?.toInt() ?? 0,
-      ),
-      nativeDataSpace: (map['nativeDataSpace'] as num?)?.toInt() ?? -1,
-      requestedHeadroom: (map['requestedHeadroom'] as num?)?.toDouble() ?? 1.0,
-      activeHeadroom: (map['activeHeadroom'] as num?)?.toDouble() ?? 1.0,
-      activeHeadroomKnown: map['activeHeadroomKnown'] == true,
-      extendedLinearActive: map['extendedLinearActive'] == true,
-      fallbackReason: ErikaOutputFallbackReason.fromNativeValue(
-        (map['fallbackReason'] as num?)?.toInt() ?? 0,
-      ),
-      fallbackCount: (map['fallbackCount'] as num?)?.toInt() ?? 0,
-      dataSpaceFailures: (map['dataSpaceFailures'] as num?)?.toInt() ?? 0,
-      headroomUpdates: (map['headroomUpdates'] as num?)?.toInt() ?? 0,
-      extendedLinearFrames: (map['extendedLinearFrames'] as num?)?.toInt() ?? 0,
-      sourceDynamicRange: ErikaDynamicRange.fromNativeValue(
-        (map['sourceDynamicRange'] as num?)?.toInt() ?? 0,
-      ),
-      activeDynamicRange: ErikaDynamicRange.fromNativeValue(
-        (map['activeDynamicRange'] as num?)?.toInt() ?? 0,
-      ),
-      hdrOutputConfirmed: map['hdrOutputConfirmed'] == true,
-    );
-  }
-
-  ErikaOutputStatus withRequestedMode(ErikaOutputMode mode) {
-    return ErikaOutputStatus(
-      requestedMode: mode,
-      activeEncoding: activeEncoding,
-      surfaceFormat: surfaceFormat,
-      nativeDataSpace: nativeDataSpace,
-      requestedHeadroom: requestedHeadroom,
-      activeHeadroom: activeHeadroom,
-      activeHeadroomKnown: activeHeadroomKnown,
-      extendedLinearActive: extendedLinearActive,
-      fallbackReason: fallbackReason,
-      fallbackCount: fallbackCount,
-      dataSpaceFailures: dataSpaceFailures,
-      headroomUpdates: headroomUpdates,
-      extendedLinearFrames: extendedLinearFrames,
-      sourceDynamicRange: sourceDynamicRange,
-      activeDynamicRange: activeDynamicRange,
-      hdrOutputConfirmed: hdrOutputConfirmed,
-    );
-  }
-}
-
-class ErikaHdrCapabilities {
-  const ErikaHdrCapabilities({
-    required this.known,
-    required this.supportedDynamicRanges,
-    required this.hdrSurfaceSupported,
-    required this.tenBitSurfaceSupported,
-    required this.hardwareAv1DecodeSupported,
-    required this.hardwareAv1DecodeKnown,
-    required this.nativeVsyncSupported,
-    required this.fallbackReason,
-  });
-
-  const ErikaHdrCapabilities.unknown()
-    : known = false,
-      supportedDynamicRanges = const <ErikaDynamicRange>[],
-      hdrSurfaceSupported = false,
-      tenBitSurfaceSupported = false,
-      hardwareAv1DecodeSupported = false,
-      hardwareAv1DecodeKnown = false,
-      nativeVsyncSupported = false,
-      fallbackReason = ErikaOutputFallbackReason.unknown;
-
-  factory ErikaHdrCapabilities.fromMap(Map<dynamic, dynamic> map) {
-    final rawRanges = map['supportedDynamicRanges'];
-    return ErikaHdrCapabilities(
-      known: map['known'] == true,
-      supportedDynamicRanges: rawRanges is List
-          ? List<ErikaDynamicRange>.unmodifiable(
-              rawRanges.whereType<num>().map(
-                (value) => ErikaDynamicRange.fromNativeValue(value.toInt()),
-              ),
-            )
-          : const <ErikaDynamicRange>[],
-      hdrSurfaceSupported: map['hdrSurfaceSupported'] == true,
-      tenBitSurfaceSupported: map['tenBitSurfaceSupported'] == true,
-      hardwareAv1DecodeSupported: map['hardwareAv1DecodeSupported'] == true,
-      hardwareAv1DecodeKnown: map['hardwareAv1DecodeKnown'] == true,
-      nativeVsyncSupported: map['nativeVsyncSupported'] == true,
-      fallbackReason: ErikaOutputFallbackReason.fromNativeValue(
-        (map['fallbackReason'] as num?)?.toInt() ?? -1,
-      ),
-    );
-  }
-
-  final bool known;
-  final List<ErikaDynamicRange> supportedDynamicRanges;
-  final bool hdrSurfaceSupported;
-  final bool tenBitSurfaceSupported;
-  final bool hardwareAv1DecodeSupported;
-  final bool hardwareAv1DecodeKnown;
-  final bool nativeVsyncSupported;
-  final ErikaOutputFallbackReason fallbackReason;
-}
-
 class ErikaPresenterResourceStatus {
   const ErikaPresenterResourceStatus({
     required this.deviceCurrentAllocatedBytes,
@@ -400,7 +86,6 @@ class ErikaPresenterResourceStatus {
     required this.rendererTrackedBytes,
     required this.presenterCpuDanmakuAtlasBytes,
     required this.drawableCount,
-    required this.outputModeSwitches,
   });
 
   /// Metal's process-wide counter for the current device. This can include
@@ -416,7 +101,6 @@ class ErikaPresenterResourceStatus {
   final int rendererTrackedBytes;
   final int presenterCpuDanmakuAtlasBytes;
   final int drawableCount;
-  final int outputModeSwitches;
 
   factory ErikaPresenterResourceStatus.fromMap(Map<dynamic, dynamic> map) {
     int value(String key) => (map[key] as num?)?.toInt() ?? 0;
@@ -435,7 +119,6 @@ class ErikaPresenterResourceStatus {
       rendererTrackedBytes: value('rendererTrackedBytes'),
       presenterCpuDanmakuAtlasBytes: value('presenterCpuDanmakuAtlasBytes'),
       drawableCount: value('drawableCount'),
-      outputModeSwitches: value('outputModeSwitches'),
     );
   }
 }
@@ -577,13 +260,7 @@ class ErikaPresenterStats {
     required this.audioRecoveryFailures,
     required this.directZeroCopyVideoFrames,
     required this.sharedHandleVideoFrames,
-    required this.hdrSourceFrames,
-    required this.hdr10OutputFrames,
     required this.sdrTonemapFrames,
-    required this.hdr10MetadataUpdates,
-    required this.hdr10MetadataFailures,
-    required this.hdr10OutputFailures,
-    required this.hdr10OutputActive,
     required this.videoFrameBackpressureDrops,
   });
 
@@ -613,13 +290,7 @@ class ErikaPresenterStats {
   final int audioRecoveryFailures;
   final int directZeroCopyVideoFrames;
   final int sharedHandleVideoFrames;
-  final int hdrSourceFrames;
-  final int hdr10OutputFrames;
   final int sdrTonemapFrames;
-  final int hdr10MetadataUpdates;
-  final int hdr10MetadataFailures;
-  final int hdr10OutputFailures;
-  final bool hdr10OutputActive;
   final int videoFrameBackpressureDrops;
 
   factory ErikaPresenterStats.fromMap(Map<dynamic, dynamic> map) {
@@ -654,13 +325,7 @@ class ErikaPresenterStats {
       audioRecoveryFailures: _intValue(map['audioRecoveryFailures']),
       directZeroCopyVideoFrames: _intValue(map['directZeroCopyVideoFrames']),
       sharedHandleVideoFrames: _intValue(map['sharedHandleVideoFrames']),
-      hdrSourceFrames: _intValue(map['hdrSourceFrames']),
-      hdr10OutputFrames: _intValue(map['hdr10OutputFrames']),
       sdrTonemapFrames: _intValue(map['sdrTonemapFrames']),
-      hdr10MetadataUpdates: _intValue(map['hdr10MetadataUpdates']),
-      hdr10MetadataFailures: _intValue(map['hdr10MetadataFailures']),
-      hdr10OutputFailures: _intValue(map['hdr10OutputFailures']),
-      hdr10OutputActive: map['hdr10OutputActive'] == true,
       videoFrameBackpressureDrops: _intValue(
         map['videoFrameBackpressureDrops'],
       ),
@@ -695,13 +360,7 @@ class ErikaPresenterStats {
       'audioRecoveryFailures': audioRecoveryFailures,
       'directZeroCopyVideoFrames': directZeroCopyVideoFrames,
       'sharedHandleVideoFrames': sharedHandleVideoFrames,
-      'hdrSourceFrames': hdrSourceFrames,
-      'hdr10OutputFrames': hdr10OutputFrames,
       'sdrTonemapFrames': sdrTonemapFrames,
-      'hdr10MetadataUpdates': hdr10MetadataUpdates,
-      'hdr10MetadataFailures': hdr10MetadataFailures,
-      'hdr10OutputFailures': hdr10OutputFailures,
-      'hdr10OutputActive': hdr10OutputActive,
       'videoFrameBackpressureDrops': videoFrameBackpressureDrops,
     };
   }
@@ -957,22 +616,10 @@ class _ErikaDanmakuConfigPatch {
 
 class ErikaPlayer {
   ErikaPlayer({
-    this.outputMode = ErikaOutputMode.auto,
-    this.edrHeadroom,
     this.upscaler,
     this.videoAlphaMode = ErikaVideoAlphaMode.opaque,
-    this.hdrDebug = false,
     this.allowBackgroundPlayback = false,
   }) {
-    final headroom = edrHeadroom;
-    if (headroom != null &&
-        (!headroom.isFinite || headroom < 1.0 || headroom > 10000.0)) {
-      throw ArgumentError.value(
-        headroom,
-        'edrHeadroom',
-        'must be finite and in [1, 10000]; omit it for system-auto headroom',
-      );
-    }
     _eventSubscription ??= _events.receiveBroadcastStream().listen(
       _dispatchNativeEvent,
       onError: (Object error, StackTrace stackTrace) {
@@ -1023,23 +670,9 @@ class ErikaPlayer {
   final List<Completer<void>> _pendingDanmakuConfigCompleters =
       <Completer<void>>[];
 
-  final ErikaOutputMode? outputMode;
-  final double? edrHeadroom;
   final ErikaUpscalerMode? upscaler;
   final ErikaVideoAlphaMode videoAlphaMode;
-  final bool hdrDebug;
   final bool allowBackgroundPlayback;
-
-  /// Resolves [outputMode] into the matching native mode and surface contract.
-  ///
-  /// This is nullable only for the legacy case where no output mode is sent to
-  /// native code.
-  ErikaOutputSurfacePlan? get outputSurfacePlan {
-    final requestedMode = outputMode;
-    return requestedMode == null
-        ? null
-        : ErikaOutputSurfacePlan.forCurrentPlatform(requestedMode);
-  }
 
   int? get id => _id;
 
@@ -1344,42 +977,6 @@ class ErikaPlayer {
       throw StateError('Erika upscaler status returned null.');
     }
     return ErikaUpscalerStatus.fromMap(status);
-  }
-
-  Future<ErikaOutputStatus> getOutputStatus() async {
-    final playerId = await ensureCreated();
-    final status = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-      'getOutputStatus',
-      <String, Object?>{'playerId': playerId},
-    );
-    if (status == null) {
-      throw StateError('Erika output status returned null.');
-    }
-    final parsed = ErikaOutputStatus.fromMap(status);
-    final requestedMode = outputMode;
-    return requestedMode == null
-        ? parsed
-        : parsed.withRequestedMode(requestedMode);
-  }
-
-  Future<ErikaHdrCapabilities> getHdrCapabilities() async {
-    final playerId = await ensureCreated();
-    try {
-      final capabilities = await _channel.invokeMethod<Map<dynamic, dynamic>>(
-        'getHdrCapabilities',
-        <String, Object?>{'playerId': playerId},
-      );
-      return capabilities == null
-          ? const ErikaHdrCapabilities.unknown()
-          : ErikaHdrCapabilities.fromMap(capabilities);
-    } on MissingPluginException {
-      return const ErikaHdrCapabilities.unknown();
-    } on PlatformException catch (error) {
-      if (error.code == 'unimplemented' || error.code == 'not_implemented') {
-        return const ErikaHdrCapabilities.unknown();
-      }
-      rethrow;
-    }
   }
 
   Future<ErikaPresenterResourceStatus> getResourceStatus() async {
@@ -1889,25 +1486,15 @@ class ErikaPlayer {
   }
 
   Future<int> _create() async {
-    final outputPlan = outputSurfacePlan;
-    final requestedHeadroom =
-        edrHeadroom ??
-        (outputMode == ErikaOutputMode.preferHdr ||
-                outputMode == ErikaOutputMode.extendedLinear
-            ? 4.0
-            : null);
     final arguments = <String, Object?>{
-      if (outputPlan case final plan?) 'outputMode': plan.nativeMode.nativeValue,
-      if (requestedHeadroom case final headroom?) 'edrHeadroom': headroom,
+      // Preserve the existing native ABI value for SDR. Older macOS, tvOS, and
+      // Windows plugins default to source-aware automatic output if omitted.
+      'outputMode': 0,
       if (upscaler case final mode?) 'upscaler': mode.nativeValue,
       if (videoAlphaMode != ErikaVideoAlphaMode.opaque)
         'videoAlphaMode': videoAlphaMode.nativeValue,
-      if (hdrDebug) 'hdrDebug': true,
       if (allowBackgroundPlayback) 'allowBackgroundPlayback': true,
     };
-    if (hdrDebug) {
-      debugPrint('ErikaHDR[Dart]: create arguments=$arguments');
-    }
     final playerId = await _channel.invokeMethod<int>('create', arguments);
     if (playerId == null || playerId <= 0) {
       throw StateError('Erika presenter creation failed.');

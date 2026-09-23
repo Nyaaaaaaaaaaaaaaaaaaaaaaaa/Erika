@@ -131,6 +131,7 @@ RGBA，或把同一帧保留在原生 SDR/HDR surface 上。
 
 | 函数 | 用途与所有权 |
 |------|--------------|
+| `erika_image_allocate_operation_id` | 为进程中的各静态图调用方分配不重复的非零操作 ID；返回零表示 ID 空间耗尽。 |
 | `erika_image_decode_uri` | 同步解码一个已缓存的本地源并返回非零、由调用方拥有的 `ErikaImageHandle`；开始工作前会清空 `out_handle`。 |
 | `erika_image_decode_uri_sized_with_policy` | 在尺寸约束之外接收调用方提供的 `ErikaImageDecodePolicy`，用于限制编码字节、源/输出像素、包处理量和超时；传 `NULL` 使用 Erika 默认值。 |
 | `erika_image_decode_uri_sized` | 新增的有界解码入口；保留源图元数据，但在 GPU 上传前约束所保留的 NV12/P010 平面，两个上限为零时保持旧版全尺寸行为。 |
@@ -147,7 +148,7 @@ RGBA，或把同一帧保留在原生 SDR/HDR surface 上。
 
 `erika_image_decode_uri` 当前仅接受已缓存的本地路径、file URI 或 owned-fd URI。传 `NULL`
 或内容为空/默认的 `ErikaOpenOptions`；HTTP header 和 read-ahead 选项会被拒绝。
-`operation_id` 必须非零，并在请求生命周期内保持进程唯一。decode 是阻塞的 C 调用，应放入
+`operation_id` 必须由 `erika_image_allocate_operation_id` 分配且非零；进程中的各调用方不能另起计数器。decode 是阻塞的 C 调用，应放入
 有界工作队列而不是 UI 线程。取消是协作式的，decode 会在下一个取消边界返回
 `ErikaImageErrorKind_Cancelled`。decode 已经成功返回 handle 后，再取消旧 operation ID 不会
 销毁该 handle。

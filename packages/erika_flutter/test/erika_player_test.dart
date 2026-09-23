@@ -18,25 +18,25 @@ void main() {
     playerCalls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'dispose' => null,
-        'registerSubtitleMemoryFont' => 41,
-        'getSubtitleMemoryFontStatus' => <String, Object?>{
-            'registeredCount': 2,
-            'registeredBytes': 4096,
-            'selectedCount': 1,
-            'generation': 3,
-            'selectedIds': <int>[41],
-          },
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'dispose' => null,
+            'registerSubtitleMemoryFont' => 41,
+            'getSubtitleMemoryFontStatus' => <String, Object?>{
+              'registeredCount': 2,
+              'registeredBytes': 4096,
+              'selectedCount': 1,
+              'generation': 3,
+              'selectedIds': <int>[41],
+            },
+            _ => null,
+          };
+        });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(eventsChannel, (MethodCall call) async {
-      return null;
-    });
+          return null;
+        });
   });
 
   tearDown(() {
@@ -47,91 +47,95 @@ void main() {
         .setMockMethodCallHandler(eventsChannel, null);
   });
 
-  testWidgets('macOS texture video view creates and attaches a Flutter texture',
-      (WidgetTester tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    final player = ErikaPlayer();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'createTexture' => 13,
-        _ => null,
-      };
-    });
+  testWidgets(
+    'macOS texture video view creates and attaches a Flutter texture',
+    (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      final player = ErikaPlayer();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
+            playerCalls.add(call);
+            return switch (call.method) {
+              'create' => 7,
+              'createTexture' => 13,
+              _ => null,
+            };
+          });
 
-    await tester.pumpWidget(
-      Directionality(
-        textDirection: TextDirection.ltr,
-        child: SizedBox(
-          width: 320,
-          height: 180,
-          child: ErikaTextureVideoView(player: player),
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.byType(Texture), findsOneWidget);
-    expect(playerCalls.map((call) => call.method), contains('createTexture'));
-    expect(playerCalls.map((call) => call.method), contains('attachView'));
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    await player.dispose();
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('macOS overlay video uses a native transparent compositing layer',
-      (WidgetTester tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform_views, (
-      MethodCall call,
-    ) async {
-      return null;
-    });
-    final player = ErikaPlayer(
-      videoAlphaMode: ErikaVideoAlphaMode.packedAlphaRight,
-    );
-    try {
       await tester.pumpWidget(
         Directionality(
           textDirection: TextDirection.ltr,
           child: SizedBox(
             width: 320,
             height: 180,
-            child: ErikaTextureVideoView(
-              player: player,
-              blendMode: BlendMode.overlay,
-              opacity: 0.2,
-            ),
+            child: ErikaTextureVideoView(player: player),
           ),
         ),
       );
       await tester.pump();
+      await tester.pump();
 
-      expect(find.byType(AppKitView), findsOneWidget);
-      expect(find.byType(Texture), findsNothing);
-      final view = tester.widget<AppKitView>(find.byType(AppKitView));
-      expect(view.creationParams, <String, Object?>{
-        'videoAlphaMode': ErikaVideoAlphaMode.packedAlphaRight.nativeValue,
-        'blendMode': 'overlay',
-        'opacity': 0.2,
-      });
-    } finally {
+      expect(find.byType(Texture), findsOneWidget);
+      expect(playerCalls.map((call) => call.method), contains('createTexture'));
+      expect(playerCalls.map((call) => call.method), contains('attachView'));
+
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await player.dispose();
       debugDefaultTargetPlatformOverride = null;
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform_views, null);
-    }
-  });
+    },
+  );
 
-  test('default player requests source-aware automatic output', () async {
+  testWidgets(
+    'macOS overlay video uses a native transparent compositing layer',
+    (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform_views, (
+            MethodCall call,
+          ) async {
+            return null;
+          });
+      final player = ErikaPlayer(
+        videoAlphaMode: ErikaVideoAlphaMode.packedAlphaRight,
+      );
+      try {
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: SizedBox(
+              width: 320,
+              height: 180,
+              child: ErikaTextureVideoView(
+                player: player,
+                blendMode: BlendMode.overlay,
+                opacity: 0.2,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.byType(AppKitView), findsOneWidget);
+        expect(find.byType(Texture), findsNothing);
+        final view = tester.widget<AppKitView>(find.byType(AppKitView));
+        expect(view.creationParams, <String, Object?>{
+          'videoAlphaMode': ErikaVideoAlphaMode.packedAlphaRight.nativeValue,
+          'blendMode': 'overlay',
+          'opacity': 0.2,
+        });
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        await player.dispose();
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform_views, null);
+      }
+    },
+  );
+
+  test('default player requests SDR output', () async {
     final player = ErikaPlayer();
 
     expect(await player.ensureCreated(), 7);
@@ -140,141 +144,9 @@ void main() {
       (MethodCall call) => call.method == 'create',
     );
     expect(createCall.arguments, isA<Map<Object?, Object?>>());
-    expect(createCall.arguments, <String, Object?>{
-      'outputMode': ErikaOutputMode.auto.nativeValue,
-    });
+    expect(createCall.arguments, <String, Object?>{'outputMode': 0});
 
     await player.dispose();
-  });
-
-  test('automatic output mode keeps the C ABI value 3', () {
-    expect(ErikaOutputMode.auto.nativeValue, 3);
-    expect(ErikaOutputMode.fromNativeValue(3), ErikaOutputMode.auto);
-  });
-
-  test('preferred HDR resolves one platform output contract', () {
-    final android = ErikaOutputSurfacePlan.forPlatform(
-      ErikaOutputMode.preferHdr,
-      TargetPlatform.android,
-    );
-    expect(android.nativeMode, ErikaOutputMode.extendedLinear);
-    expect(android.requiresAndroidExtendedLinearSurface, isTrue);
-
-    final ios = ErikaOutputSurfacePlan.forPlatform(
-      ErikaOutputMode.preferHdr,
-      TargetPlatform.iOS,
-    );
-    expect(ios.nativeMode, ErikaOutputMode.appleEdr);
-    expect(ios.requiresAndroidExtendedLinearSurface, isFalse);
-
-    final linux = ErikaOutputSurfacePlan.forPlatform(
-      ErikaOutputMode.preferHdr,
-      TargetPlatform.linux,
-    );
-    expect(linux.nativeMode, ErikaOutputMode.auto);
-    expect(linux.requiresAndroidExtendedLinearSurface, isFalse);
-  });
-
-  test('preferred HDR is passed to Android native player as extended-linear',
-      () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final player = ErikaPlayer(outputMode: ErikaOutputMode.preferHdr);
-    try {
-      expect(await player.ensureCreated(), 7);
-
-      final createCall = playerCalls.singleWhere(
-        (MethodCall call) => call.method == 'create',
-      );
-      final arguments = createCall.arguments as Map<Object?, Object?>;
-      expect(
-        arguments['outputMode'],
-        ErikaOutputMode.extendedLinear.nativeValue,
-      );
-      expect(arguments['edrHeadroom'], 4.0);
-    } finally {
-      await player.dispose();
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
-
-  testWidgets('HDR image presentation follows native output confirmation', (
-    WidgetTester tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      return switch (call.method) {
-        'getImageCapabilities' => <String, Object?>{
-          'sdrDecodeSupported': true,
-          'hdrSurfaceSupported': true,
-          'activeBackend': 'hardware',
-          'maxEncodedBytes': 128 * 1024 * 1024,
-          'maxSourcePixels': 32 * 1024 * 1024,
-          'maxOutputPixels': 32 * 1024 * 1024,
-          'maxConcurrentDecodes': 1,
-        },
-        'decodeImage' => <String, Object?>{
-          'presentation': 'hdr',
-          'imageId': 11,
-          'sourceWidth': 100,
-          'sourceHeight': 100,
-          'sourceDynamicRange': 2,
-        },
-        'disposeHdrImage' || 'cancelImageDecode' => null,
-        _ => null,
-      };
-    });
-    final platformViewCalls = <MethodCall>[];
-    messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
-      MethodCall call,
-    ) async {
-      platformViewCalls.add(call);
-      return null;
-    });
-    final presentations = <ErikaImagePresentation>[];
-
-    try {
-      await tester.pumpWidget(
-        _hdrImageHost(onPresentationChanged: presentations.add),
-      );
-      await _pumpHdrImageSurface(tester);
-
-      final createCall = platformViewCalls.singleWhere(
-        (MethodCall call) => call.method == 'create',
-      );
-      final createArguments = createCall.arguments as Map<Object?, Object?>;
-      expect(createArguments['viewType'], 'erika_flutter/hdr_image_view');
-      expect(presentations, isEmpty);
-
-      await _dispatchHdrImageSurfaceEvent(
-        messenger: messenger,
-        viewId: createArguments['id']! as int,
-        hdrOutputConfirmed: false,
-      );
-      await tester.pump();
-
-      expect(presentations, <ErikaImagePresentation>[
-        ErikaImagePresentation.sdr,
-      ]);
-
-      await _dispatchHdrImageSurfaceEvent(
-        messenger: messenger,
-        viewId: createArguments['id']! as int,
-        hdrOutputConfirmed: true,
-      );
-      await tester.pump();
-
-      expect(presentations, <ErikaImagePresentation>[
-        ErikaImagePresentation.sdr,
-        ErikaImagePresentation.hdr,
-      ]);
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-      debugDefaultTargetPlatformOverride = null;
-      messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
-    }
   });
 
   test('background playback is opt-in at player creation', () async {
@@ -286,7 +158,7 @@ void main() {
       (MethodCall call) => call.method == 'create',
     );
     expect(createCall.arguments, <String, Object?>{
-      'outputMode': ErikaOutputMode.auto.nativeValue,
+      'outputMode': 0,
       'allowBackgroundPlayback': true,
     });
 
@@ -338,34 +210,34 @@ void main() {
     expect(status.selectedIds, <int>[41]);
     expect(
       playerCalls
-          .singleWhere(
-            (call) => call.method == 'clearSubtitleMemoryFonts',
-          )
+          .singleWhere((call) => call.method == 'clearSubtitleMemoryFonts')
           .arguments,
       <String, Object?>{'playerId': 7},
     );
     await player.dispose();
   });
 
-  test('subtitle memory font arguments are validated before channel calls',
-      () async {
-    final player = ErikaPlayer();
+  test(
+    'subtitle memory font arguments are validated before channel calls',
+    () async {
+      final player = ErikaPlayer();
 
-    await expectLater(
-      player.registerSubtitleMemoryFont(Uint8List(0)),
-      throwsArgumentError,
-    );
-    await expectLater(
-      player.selectSubtitleMemoryFonts(<int>[1, 1]),
-      throwsArgumentError,
-    );
-    await expectLater(
-      player.selectSubtitleMemoryFonts(<int>[0]),
-      throwsArgumentError,
-    );
-    expect(playerCalls, isEmpty);
-    await player.dispose();
-  });
+      await expectLater(
+        player.registerSubtitleMemoryFont(Uint8List(0)),
+        throwsArgumentError,
+      );
+      await expectLater(
+        player.selectSubtitleMemoryFonts(<int>[1, 1]),
+        throwsArgumentError,
+      );
+      await expectLater(
+        player.selectSubtitleMemoryFonts(<int>[0]),
+        throwsArgumentError,
+      );
+      expect(playerCalls, isEmpty);
+      await player.dispose();
+    },
+  );
 
   test('open omits null and empty HTTP headers', () async {
     final player = ErikaPlayer();
@@ -444,21 +316,23 @@ void main() {
     await player.dispose();
   });
 
-  test('open rejects a negative HTTP read-ahead before channel calls',
-      () async {
-    final player = ErikaPlayer();
+  test(
+    'open rejects a negative HTTP read-ahead before channel calls',
+    () async {
+      final player = ErikaPlayer();
 
-    await expectLater(
-      player.open(
-        'https://example.test/read-ahead.mkv',
-        httpReadAheadBytes: -1,
-      ),
-      throwsArgumentError,
-    );
+      await expectLater(
+        player.open(
+          'https://example.test/read-ahead.mkv',
+          httpReadAheadBytes: -1,
+        ),
+        throwsArgumentError,
+      );
 
-    expect(playerCalls, isEmpty);
-    await player.dispose();
-  });
+      expect(playerCalls, isEmpty);
+      await player.dispose();
+    },
+  );
 
   test('media metadata is forwarded for system now playing info', () async {
     final player = ErikaPlayer();
@@ -522,74 +396,6 @@ void main() {
     await player.dispose();
   });
 
-  test('apple EDR output mode is passed to native create', () async {
-    final player = ErikaPlayer(
-      outputMode: ErikaOutputMode.appleEdr,
-      edrHeadroom: 4.0,
-    );
-
-    expect(await player.ensureCreated(), 7);
-
-    final createCall = playerCalls.singleWhere(
-      (MethodCall call) => call.method == 'create',
-    );
-    final arguments = createCall.arguments as Map<Object?, Object?>;
-    expect(arguments['outputMode'], ErikaOutputMode.appleEdr.nativeValue);
-    expect(arguments['edrHeadroom'], 4.0);
-
-    await player.dispose();
-  });
-
-  test('extended-linear output mode is passed to native create', () async {
-    final player = ErikaPlayer(
-      outputMode: ErikaOutputMode.extendedLinear,
-      edrHeadroom: 3.0,
-    );
-
-    expect(await player.ensureCreated(), 7);
-
-    final createCall = playerCalls.singleWhere(
-      (MethodCall call) => call.method == 'create',
-    );
-    final arguments = createCall.arguments as Map<Object?, Object?>;
-    expect(arguments['outputMode'], ErikaOutputMode.extendedLinear.nativeValue);
-    expect(arguments['edrHeadroom'], 3.0);
-
-    await player.dispose();
-  });
-
-  test('extended-linear output defaults shader headroom to four', () async {
-    final player = ErikaPlayer(outputMode: ErikaOutputMode.extendedLinear);
-
-    expect(await player.ensureCreated(), 7);
-
-    final createCall = playerCalls.singleWhere(
-      (MethodCall call) => call.method == 'create',
-    );
-    final arguments = createCall.arguments as Map<Object?, Object?>;
-    expect(arguments['edrHeadroom'], 4.0);
-
-    await player.dispose();
-  });
-
-  test('invalid explicit output headroom is rejected before native create', () {
-    expect(
-      () => ErikaPlayer(
-        outputMode: ErikaOutputMode.extendedLinear,
-        edrHeadroom: 0.5,
-      ),
-      throwsArgumentError,
-    );
-    expect(
-      () => ErikaPlayer(
-        outputMode: ErikaOutputMode.extendedLinear,
-        edrHeadroom: double.nan,
-      ),
-      throwsArgumentError,
-    );
-    expect(playerCalls, isEmpty);
-  });
-
   test('initial upscaler mode is passed to native create', () async {
     final player = ErikaPlayer(upscaler: ErikaUpscalerMode.artCnnC4F16Ds);
 
@@ -623,20 +429,6 @@ void main() {
     await player.dispose();
   });
 
-  test('HDR debug flag is passed to native create when enabled', () async {
-    final player = ErikaPlayer(hdrDebug: true);
-
-    expect(await player.ensureCreated(), 7);
-
-    final createCall = playerCalls.singleWhere(
-      (MethodCall call) => call.method == 'create',
-    );
-    final arguments = createCall.arguments as Map<Object?, Object?>;
-    expect(arguments['hdrDebug'], true);
-
-    await player.dispose();
-  });
-
   test(
     'dispose waits for delayed create and blocks pending player calls',
     () async {
@@ -644,13 +436,13 @@ void main() {
       final disposeCompleter = Completer<void>();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-        playerCalls.add(call);
-        return switch (call.method) {
-          'create' => createCompleter.future,
-          'dispose' => disposeCompleter.future,
-          _ => null,
-        };
-      });
+            playerCalls.add(call);
+            return switch (call.method) {
+              'create' => createCompleter.future,
+              'dispose' => disposeCompleter.future,
+              _ => null,
+            };
+          });
       final player = ErikaPlayer();
 
       final openFuture = player.open('/tmp/delayed.mkv');
@@ -701,14 +493,14 @@ void main() {
   test('external subtitle add returns native track id', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'addExternalSubtitle' => 1000001,
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'addExternalSubtitle' => 1000001,
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final trackId = await player.addExternalSubtitle('/tmp/subs.srt');
@@ -744,14 +536,14 @@ void main() {
   test('screenshot forwards optional capture size', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'screenshot' => Uint8List.fromList(<int>[1, 2, 3, 4]),
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'screenshot' => Uint8List.fromList(<int>[1, 2, 3, 4]),
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final bytes = await player.screenshot(width: 320, height: 180);
@@ -772,13 +564,13 @@ void main() {
   test('screenshot returns null when native has no current frame', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      return switch (call.method) {
-        'create' => 7,
-        'screenshot' => null,
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          return switch (call.method) {
+            'create' => 7,
+            'screenshot' => null,
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     expect(await player.screenshot(width: 320, height: 180), isNull);
@@ -846,14 +638,14 @@ void main() {
   test('window overlay methods forward surface geometry', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'attachOverlay' => ErikaPlayer.windowOverlayViewId,
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'attachOverlay' => ErikaPlayer.windowOverlayViewId,
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final viewId = await player.attachWindowOverlay(
@@ -917,37 +709,39 @@ void main() {
     await player.dispose();
   });
 
-  test('window overlay explicitly targets the main window by default',
-      () async {
-    final player = ErikaPlayer();
+  test(
+    'window overlay explicitly targets the main window by default',
+    () async {
+      final player = ErikaPlayer();
 
-    await player.attachWindowOverlay(flutterViewId: 3);
-    await player.setWindowOverlayFrame(
-      frame: const Rect.fromLTWH(0, 0, 640, 360),
-      visible: true,
-      generation: 7,
-      flutterViewId: 3,
-    );
+      await player.attachWindowOverlay(flutterViewId: 3);
+      await player.setWindowOverlayFrame(
+        frame: const Rect.fromLTWH(0, 0, 640, 360),
+        visible: true,
+        generation: 7,
+        flutterViewId: 3,
+      );
 
-    expect(
-      playerCalls
-          .singleWhere((MethodCall call) => call.method == 'attachOverlay')
-          .arguments,
-      <String, Object?>{
-        'playerId': 7,
-        'flutterViewId': 3,
-        'secondaryWindow': false,
-      },
-    );
-    expect(
-      playerCalls
-          .singleWhere((MethodCall call) => call.method == 'setOverlayFrame')
-          .arguments,
-      containsPair('secondaryWindow', false),
-    );
+      expect(
+        playerCalls
+            .singleWhere((MethodCall call) => call.method == 'attachOverlay')
+            .arguments,
+        <String, Object?>{
+          'playerId': 7,
+          'flutterViewId': 3,
+          'secondaryWindow': false,
+        },
+      );
+      expect(
+        playerCalls
+            .singleWhere((MethodCall call) => call.method == 'setOverlayFrame')
+            .arguments,
+        containsPair('secondaryWindow', false),
+      );
 
-    await player.dispose();
-  });
+      await player.dispose();
+    },
+  );
 
   testWidgets('window overlay uses the Android TextureView platform view', (
     WidgetTester tester,
@@ -955,18 +749,18 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform_views, (
-      MethodCall call,
-    ) async {
-      final arguments = call.arguments as Map<Object?, Object?>?;
-      return switch (call.method) {
-        'create' => 1,
-        'resize' => <String, Object?>{
-            'width': arguments!['width'],
-            'height': arguments['height'],
-          },
-        _ => null,
-      };
-    });
+          MethodCall call,
+        ) async {
+          final arguments = call.arguments as Map<Object?, Object?>?;
+          return switch (call.method) {
+            'create' => 1,
+            'resize' => <String, Object?>{
+              'width': arguments!['width'],
+              'height': arguments['height'],
+            },
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
     try {
       await tester.pumpWidget(
@@ -1001,218 +795,6 @@ void main() {
     }
   });
 
-  testWidgets(
-    'extended-linear Android view forces Hybrid Composition SurfaceView',
-    (WidgetTester tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final platformViewCalls = <MethodCall>[];
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform_views, (
-        MethodCall call,
-      ) async {
-        platformViewCalls.add(call);
-        return null;
-      });
-      final player = ErikaPlayer(
-        outputMode: ErikaOutputMode.extendedLinear,
-        edrHeadroom: 4.0,
-      );
-      try {
-        await tester.pumpWidget(
-          Directionality(
-            textDirection: TextDirection.ltr,
-            child: SizedBox(
-              width: 320,
-              height: 180,
-              child: ErikaVideoView(
-                player: player,
-                debugLabel: 'android-hdr-video',
-              ),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.byType(PlatformViewLink), findsOneWidget);
-        expect(find.byType(AndroidView), findsNothing);
-        final createCall = platformViewCalls.singleWhere(
-          (MethodCall call) => call.method == 'create',
-        );
-        final createArguments = createCall.arguments as Map<Object?, Object?>;
-        expect(createArguments['viewType'], 'erika_flutter/hdr_video_view');
-        expect(createArguments['hybrid'], isTrue);
-        final encodedParams = createArguments['params'] as Uint8List;
-        final creationParams = const StandardMessageCodec().decodeMessage(
-          ByteData.sublistView(encodedParams),
-        ) as Map<Object?, Object?>;
-        expect(
-          creationParams['outputMode'],
-          ErikaOutputMode.extendedLinear.nativeValue,
-        );
-        expect(creationParams['requestedHdrHeadroom'], 4.0);
-        expect(creationParams['composition'], 'hybrid');
-
-        final attachCall = playerCalls.singleWhere(
-          (MethodCall call) => call.method == 'attachView',
-        );
-        final attachArguments = attachCall.arguments as Map<Object?, Object?>;
-        expect(attachArguments['playerId'], 7);
-        expect(attachArguments['viewId'], createArguments['id']);
-      } finally {
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pumpAndSettle();
-        await player.dispose();
-        debugDefaultTargetPlatformOverride = null;
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(SystemChannels.platform_views, null);
-      }
-    },
-  );
-
-  testWidgets(
-    'preferred-HDR Android view uses the matching Hybrid Composition SurfaceView',
-    (WidgetTester tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final platformViewCalls = <MethodCall>[];
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform_views, (
-        MethodCall call,
-      ) async {
-        platformViewCalls.add(call);
-        return null;
-      });
-      final player = ErikaPlayer(
-        outputMode: ErikaOutputMode.preferHdr,
-        edrHeadroom: 4.0,
-      );
-      try {
-        await tester.pumpWidget(
-          Directionality(
-            textDirection: TextDirection.ltr,
-            child: SizedBox(
-              width: 320,
-              height: 180,
-              child: ErikaVideoView(
-                player: player,
-                debugLabel: 'android-preferred-hdr-video',
-              ),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.byType(PlatformViewLink), findsOneWidget);
-        expect(find.byType(AndroidView), findsNothing);
-        final createCall = platformViewCalls.singleWhere(
-          (MethodCall call) => call.method == 'create',
-        );
-        final createArguments = createCall.arguments as Map<Object?, Object?>;
-        expect(createArguments['viewType'], 'erika_flutter/hdr_video_view');
-        expect(createArguments['hybrid'], isTrue);
-        final encodedParams = createArguments['params'] as Uint8List;
-        final creationParams = const StandardMessageCodec().decodeMessage(
-          ByteData.sublistView(encodedParams),
-        ) as Map<Object?, Object?>;
-        expect(
-          creationParams['outputMode'],
-          ErikaOutputMode.extendedLinear.nativeValue,
-        );
-        expect(creationParams['requestedHdrHeadroom'], 4.0);
-        expect(creationParams['composition'], 'hybrid');
-
-        final playerCreateCall = playerCalls.singleWhere(
-          (MethodCall call) => call.method == 'create',
-        );
-        final playerCreateArguments =
-            playerCreateCall.arguments as Map<Object?, Object?>;
-        expect(
-          playerCreateArguments['outputMode'],
-          ErikaOutputMode.extendedLinear.nativeValue,
-        );
-      } finally {
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pumpAndSettle();
-        await player.dispose();
-        debugDefaultTargetPlatformOverride = null;
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(SystemChannels.platform_views, null);
-      }
-    },
-  );
-
-  testWidgets('changing extended-linear headroom recreates the Android view', (
-    WidgetTester tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    var nextPlayerId = 7;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => nextPlayerId++,
-        'dispose' => null,
-        _ => null,
-      };
-    });
-    final platformViewCalls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform_views, (
-      MethodCall call,
-    ) async {
-      platformViewCalls.add(call);
-      return null;
-    });
-    final automatic = ErikaPlayer(outputMode: ErikaOutputMode.extendedLinear);
-    final explicit = ErikaPlayer(
-      outputMode: ErikaOutputMode.extendedLinear,
-      edrHeadroom: 2.5,
-    );
-    try {
-      Widget view(ErikaPlayer player) => Directionality(
-            textDirection: TextDirection.ltr,
-            child: SizedBox(
-              width: 320,
-              height: 180,
-              child: ErikaVideoView(player: player),
-            ),
-          );
-
-      await tester.pumpWidget(view(automatic));
-      await tester.pumpAndSettle();
-      await tester.pumpWidget(view(explicit));
-      await tester.pumpAndSettle();
-
-      final createCalls = platformViewCalls
-          .where((MethodCall call) => call.method == 'create')
-          .toList(growable: false);
-      expect(createCalls, hasLength(2));
-      final creationParams = createCalls.map((MethodCall call) {
-        final arguments = call.arguments as Map<Object?, Object?>;
-        return const StandardMessageCodec().decodeMessage(
-          ByteData.sublistView(arguments['params'] as Uint8List),
-        ) as Map<Object?, Object?>;
-      }).toList(growable: false);
-      expect(creationParams[0]['requestedHdrHeadroom'], 0.0);
-      expect(creationParams[1]['requestedHdrHeadroom'], 2.5);
-      expect(
-        playerCalls.where((MethodCall call) => call.method == 'attachView'),
-        hasLength(2),
-      );
-      expect(
-        playerCalls.where((MethodCall call) => call.method == 'detachView'),
-        isNotEmpty,
-      );
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-      await automatic.dispose();
-      await explicit.dispose();
-      debugDefaultTargetPlatformOverride = null;
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform_views, null);
-    }
-  });
-
   testWidgets('Android player switch retries a transient attach failure', (
     WidgetTester tester,
   ) async {
@@ -1221,46 +803,46 @@ void main() {
     var replacementAttachAttempts = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      final arguments = call.arguments as Map<Object?, Object?>?;
-      return switch (call.method) {
-        'create' => nextPlayerId++,
-        'attachView' when arguments?['playerId'] == 8 =>
-          ++replacementAttachAttempts < 3
-              ? throw PlatformException(
-                  code: 'ERIKA_ERROR',
-                  message: 'transient detach recovery',
-                )
-              : null,
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          final arguments = call.arguments as Map<Object?, Object?>?;
+          return switch (call.method) {
+            'create' => nextPlayerId++,
+            'attachView' when arguments?['playerId'] == 8 =>
+              ++replacementAttachAttempts < 3
+                  ? throw PlatformException(
+                      code: 'ERIKA_ERROR',
+                      message: 'transient detach recovery',
+                    )
+                  : null,
+            'dispose' => null,
+            _ => null,
+          };
+        });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform_views, (
-      MethodCall call,
-    ) async {
-      final arguments = call.arguments as Map<Object?, Object?>?;
-      return switch (call.method) {
-        'create' => 1,
-        'resize' => <String, Object?>{
-            'width': arguments!['width'],
-            'height': arguments['height'],
-          },
-        _ => null,
-      };
-    });
+          MethodCall call,
+        ) async {
+          final arguments = call.arguments as Map<Object?, Object?>?;
+          return switch (call.method) {
+            'create' => 1,
+            'resize' => <String, Object?>{
+              'width': arguments!['width'],
+              'height': arguments['height'],
+            },
+            _ => null,
+          };
+        });
     final initial = ErikaPlayer();
     final replacement = ErikaPlayer();
     try {
       Widget view(ErikaPlayer player) => Directionality(
-            textDirection: TextDirection.ltr,
-            child: SizedBox(
-              width: 320,
-              height: 180,
-              child: ErikaVideoView(player: player),
-            ),
-          );
+        textDirection: TextDirection.ltr,
+        child: SizedBox(
+          width: 320,
+          height: 180,
+          child: ErikaVideoView(player: player),
+        ),
+      );
 
       await tester.pumpWidget(view(initial));
       await tester.pumpAndSettle();
@@ -1289,89 +871,83 @@ void main() {
     }
   });
 
-  testWidgets(
-    'stale Android platform view creation cannot replace new output config',
-    (WidgetTester tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      var nextPlayerId = 7;
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-        playerCalls.add(call);
-        return switch (call.method) {
-          'create' => nextPlayerId++,
-          'dispose' => null,
-          _ => null,
-        };
-      });
-      final createCompleters = <Completer<void>>[];
-      final createViewIds = <int>[];
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform_views, (
-        MethodCall call,
-      ) {
-        if (call.method != 'create') {
-          return Future<Object?>.value(null);
-        }
-        final arguments = call.arguments as Map<Object?, Object?>;
-        final completer = Completer<void>();
-        createViewIds.add(arguments['id']! as int);
-        createCompleters.add(completer);
-        return completer.future.then<Object?>((_) => null);
-      });
-      final automatic = ErikaPlayer(outputMode: ErikaOutputMode.extendedLinear);
-      final explicit = ErikaPlayer(
-        outputMode: ErikaOutputMode.extendedLinear,
-        edrHeadroom: 2.5,
-      );
-      try {
-        expect(await automatic.ensureCreated(), 7);
-        expect(await explicit.ensureCreated(), 8);
-        Widget view(ErikaPlayer player) => Directionality(
-              textDirection: TextDirection.ltr,
-              child: SizedBox(
-                width: 320,
-                height: 180,
-                child: ErikaVideoView(player: player),
-              ),
-            );
-
-        await tester.pumpWidget(view(automatic));
-        await tester.pump();
-        expect(createCompleters, hasLength(1));
-
-        await tester.pumpWidget(view(explicit));
-        await tester.pump();
-        expect(createCompleters, hasLength(2));
-
-        createCompleters[1].complete();
-        await tester.pump();
-        createCompleters[0].complete();
-        await tester.pump();
-
-        final attachCalls = playerCalls
-            .where((MethodCall call) => call.method == 'attachView')
-            .toList(growable: false);
-        expect(attachCalls, hasLength(1));
-        expect(attachCalls.single.arguments, <String, Object?>{
-          'playerId': 8,
-          'viewId': createViewIds[1],
+  testWidgets('late Android view creation attaches the current player', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    var nextPlayerId = 7;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => nextPlayerId++,
+            'dispose' => null,
+            _ => null,
+          };
         });
-      } finally {
-        for (final completer in createCompleters) {
-          if (!completer.isCompleted) {
-            completer.complete();
+    final createCompleters = <Completer<void>>[];
+    final createViewIds = <int>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform_views, (
+          MethodCall call,
+        ) {
+          if (call.method != 'create') {
+            return Future<Object?>.value(null);
           }
+          final arguments = call.arguments as Map<Object?, Object?>;
+          final completer = Completer<void>();
+          createViewIds.add(arguments['id']! as int);
+          createCompleters.add(completer);
+            return completer.future.then<Object?>((_) => 42);
+        });
+    final initial = ErikaPlayer();
+    final replacement = ErikaPlayer();
+    try {
+      expect(await initial.ensureCreated(), 7);
+      expect(await replacement.ensureCreated(), 8);
+      Widget view(ErikaPlayer player) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: SizedBox(
+          width: 320,
+          height: 180,
+          child: ErikaVideoView(player: player),
+        ),
+      );
+
+      await tester.pumpWidget(view(initial));
+      await tester.pump();
+      expect(createCompleters, hasLength(1));
+
+      await tester.pumpWidget(view(replacement));
+      await tester.pump();
+      expect(createCompleters, hasLength(1));
+
+      createCompleters.single.complete();
+      await tester.pump();
+
+      final attachCalls = playerCalls
+          .where((MethodCall call) => call.method == 'attachView')
+          .toList(growable: false);
+      expect(attachCalls, hasLength(1));
+      expect(attachCalls.single.arguments, <String, Object?>{
+        'playerId': 8,
+        'viewId': createViewIds.single,
+      });
+    } finally {
+      for (final completer in createCompleters) {
+        if (!completer.isCompleted) {
+          completer.complete();
         }
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pumpAndSettle();
-        await automatic.dispose();
-        await explicit.dispose();
-        debugDefaultTargetPlatformOverride = null;
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(SystemChannels.platform_views, null);
       }
-    },
-  );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await initial.dispose();
+      await replacement.dispose();
+      debugDefaultTargetPlatformOverride = null;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform_views, null);
+    }
+  });
 
   test('upscaler mode is forwarded to native presenter', () async {
     final player = ErikaPlayer();
@@ -1399,22 +975,22 @@ void main() {
   test('upscaler status is decoded from native presenter', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'getUpscalerStatus' => <String, Object?>{
-            'requestedMode': ErikaUpscalerMode.artCnnC4F32.nativeValue,
-            'activeBackend':
-                ErikaUpscalerBackendStatus.simdgroupMatrix.nativeValue,
-            'fallbackCount': 1,
-            'upscaledFrames': 42,
-            'lastEncodeMicros': 1200,
-            'lastGpuMicros': 3400,
-          },
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'getUpscalerStatus' => <String, Object?>{
+              'requestedMode': ErikaUpscalerMode.artCnnC4F32.nativeValue,
+              'activeBackend':
+                  ErikaUpscalerBackendStatus.simdgroupMatrix.nativeValue,
+              'fallbackCount': 1,
+              'upscaledFrames': 42,
+              'lastEncodeMicros': 1200,
+              'lastGpuMicros': 3400,
+            },
+            'dispose' => null,
+            _ => null,
+          };
+        });
 
     final player = ErikaPlayer();
 
@@ -1435,84 +1011,29 @@ void main() {
     await player.dispose();
   });
 
-  test(
-    'extended-linear output status is decoded from native presenter',
-    () async {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-        playerCalls.add(call);
-        return switch (call.method) {
-          'create' => 7,
-          'getOutputStatus' => <String, Object?>{
-              'requestedMode': ErikaOutputMode.extendedLinear.nativeValue,
-              'activeEncoding': ErikaActiveOutputEncoding
-                  .androidExtendedLinearScRgb.nativeValue,
-              'surfaceFormat':
-                  ErikaOutputSurfaceFormat.sixteenBitFloat.nativeValue,
-              'nativeDataSpace': 0x18410000,
-              'requestedHeadroom': 4.0,
-              'activeHeadroom': 3.5,
-              'activeHeadroomKnown': true,
-              'extendedLinearActive': true,
-              'fallbackReason': ErikaOutputFallbackReason.none.nativeValue,
-              'fallbackCount': 0,
-              'dataSpaceFailures': 0,
-              'headroomUpdates': 2,
-              'extendedLinearFrames': 42,
-            },
-          'dispose' => null,
-          _ => null,
-        };
-      });
-
-      final player = ErikaPlayer(outputMode: ErikaOutputMode.extendedLinear);
-      final status = await player.getOutputStatus();
-
-      expect(status.requestedMode, ErikaOutputMode.extendedLinear);
-      expect(
-        status.activeEncoding,
-        ErikaActiveOutputEncoding.androidExtendedLinearScRgb,
-      );
-      expect(status.surfaceFormat, ErikaOutputSurfaceFormat.sixteenBitFloat);
-      expect(status.nativeDataSpace, 0x18410000);
-      expect(status.activeHeadroom, 3.5);
-      expect(status.extendedLinearActive, isTrue);
-      expect(status.fallbackReason, ErikaOutputFallbackReason.none);
-      expect(status.extendedLinearFrames, 42);
-
-      final call = playerCalls.singleWhere(
-        (MethodCall call) => call.method == 'getOutputStatus',
-      );
-      expect(call.arguments, <String, Object?>{'playerId': 7});
-
-      await player.dispose();
-    },
-  );
-
   test('renderer resource status is decoded from native presenter', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'getResourceStatus' => <String, Object?>{
-            'deviceCurrentAllocatedBytes': 1000000000,
-            'deviceRecommendedWorkingSetBytes': 8000000000,
-            'drawableEstimatedBytes': 99532800,
-            'videoFrameBytes': 24883200,
-            'overlayAtlasBytes': 2097152,
-            'danmakuAtlasBytes': 4194304,
-            'danmakuVertexBufferBytes': 65536,
-            'upscalerBytes': 0,
-            'rendererTrackedBytes': 130772992,
-            'presenterCpuDanmakuAtlasBytes': 4194304,
-            'drawableCount': 3,
-            'outputModeSwitches': 1,
-          },
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'getResourceStatus' => <String, Object?>{
+              'deviceCurrentAllocatedBytes': 1000000000,
+              'deviceRecommendedWorkingSetBytes': 8000000000,
+              'drawableEstimatedBytes': 99532800,
+              'videoFrameBytes': 24883200,
+              'overlayAtlasBytes': 2097152,
+              'danmakuAtlasBytes': 4194304,
+              'danmakuVertexBufferBytes': 65536,
+              'upscalerBytes': 0,
+              'rendererTrackedBytes': 130772992,
+              'presenterCpuDanmakuAtlasBytes': 4194304,
+              'drawableCount': 3,
+            },
+            'dispose' => null,
+            _ => null,
+          };
+        });
 
     final player = ErikaPlayer();
     final status = await player.getResourceStatus();
@@ -1522,7 +1043,6 @@ void main() {
     expect(status.videoFrameBytes, 24883200);
     expect(status.rendererTrackedBytes, 130772992);
     expect(status.drawableCount, 3);
-    expect(status.outputModeSwitches, 1);
 
     final call = playerCalls.singleWhere(
       (MethodCall call) => call.method == 'getResourceStatus',
@@ -1716,15 +1236,15 @@ void main() {
   test('danmaku track controls forward multi-track input', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'addDanmakuTrackFile' => 11,
-        'addDanmakuTrackJson' => 12,
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'addDanmakuTrackFile' => 11,
+            'addDanmakuTrackJson' => 12,
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final fileTrack = await player.addDanmakuTrackFile(
@@ -1807,23 +1327,23 @@ void main() {
   test('danmaku tracks query parses native track list', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'danmakuTracks' => <Map<String, Object?>>[
-            <String, Object?>{
-              'id': 11,
-              'enabled': true,
-              'offsetMicros': -500000,
-              'itemCount': 42,
-              'name': 'A',
-              'source': '/tmp/a.xml',
-            },
-          ],
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'danmakuTracks' => <Map<String, Object?>>[
+              <String, Object?>{
+                'id': 11,
+                'enabled': true,
+                'offsetMicros': -500000,
+                'itemCount': 42,
+                'name': 'A',
+                'source': '/tmp/a.xml',
+              },
+            ],
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final tracks = await player.danmakuTracks();
@@ -1842,40 +1362,40 @@ void main() {
   test('tracks query parses native track list', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(playerChannel, (MethodCall call) async {
-      playerCalls.add(call);
-      return switch (call.method) {
-        'create' => 7,
-        'tracks' => <Map<String, Object?>>[
-            <String, Object?>{
-              'id': 0,
-              'kind': 0,
-              'source': 0,
-              'selected': true,
-              'canRemove': false,
-              'title': 'Main video',
-              'language': null,
-              'codec': 'hevc',
-              'width': 3840,
-              'height': 2160,
-              'bitRate': 18000000,
-              'frameRateNumerator': 30000,
-              'frameRateDenominator': 1001,
-            },
-            <String, Object?>{
-              'id': 1000001,
-              'kind': 2,
-              'source': 1,
-              'selected': true,
-              'canRemove': true,
-              'title': 'subs.srt',
-              'language': 'jpn',
-              'codec': 'subrip',
-            },
-          ],
-        'dispose' => null,
-        _ => null,
-      };
-    });
+          playerCalls.add(call);
+          return switch (call.method) {
+            'create' => 7,
+            'tracks' => <Map<String, Object?>>[
+              <String, Object?>{
+                'id': 0,
+                'kind': 0,
+                'source': 0,
+                'selected': true,
+                'canRemove': false,
+                'title': 'Main video',
+                'language': null,
+                'codec': 'hevc',
+                'width': 3840,
+                'height': 2160,
+                'bitRate': 18000000,
+                'frameRateNumerator': 30000,
+                'frameRateDenominator': 1001,
+              },
+              <String, Object?>{
+                'id': 1000001,
+                'kind': 2,
+                'source': 1,
+                'selected': true,
+                'canRemove': true,
+                'title': 'subs.srt',
+                'language': 'jpn',
+                'codec': 'subrip',
+              },
+            ],
+            'dispose' => null,
+            _ => null,
+          };
+        });
     final player = ErikaPlayer();
 
     final tracks = await player.tracks();
@@ -2050,55 +1570,4 @@ void main() {
     expect(unknownEvent.kind, ErikaEventKind.systemMediaNavigationRequested);
     expect(unknownEvent.systemMediaCommand, isNull);
   });
-}
-
-Future<void> _pumpHdrImageSurface(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump();
-  await tester.pump();
-}
-
-Widget _hdrImageHost({
-  required ValueChanged<ErikaImagePresentation> onPresentationChanged,
-}) =>
-    MediaQuery(
-      data: const MediaQueryData(),
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: SizedBox(
-          width: 100,
-          height: 100,
-          child: ErikaImage.file(
-            '/hdr-fallback.avif',
-            placeholder: const SizedBox.expand(),
-            onPresentationChanged: onPresentationChanged,
-          ),
-        ),
-      ),
-    );
-
-Future<void> _dispatchHdrImageSurfaceEvent({
-  required TestDefaultBinaryMessenger messenger,
-  required int viewId,
-  required bool hdrOutputConfirmed,
-}) async {
-  final response = Completer<void>();
-  messenger.handlePlatformMessage(
-    'erika_flutter/player',
-    const StandardMethodCodec().encodeMethodCall(
-      MethodCall('imageSurfaceEvent', <String, Object?>{
-        'viewId': viewId,
-        'imageId': 11,
-        'ok': true,
-        'value': <String, Object?>{
-          'hdrOutputConfirmed': hdrOutputConfirmed,
-          'activeDynamicRange': hdrOutputConfirmed ? 2 : 1,
-          'activeEncoding': hdrOutputConfirmed ? 2 : 0,
-          'fallbackReason': hdrOutputConfirmed ? 0 : 1,
-        },
-      }),
-    ),
-    (_) => response.complete(),
-  );
-  await response.future;
 }

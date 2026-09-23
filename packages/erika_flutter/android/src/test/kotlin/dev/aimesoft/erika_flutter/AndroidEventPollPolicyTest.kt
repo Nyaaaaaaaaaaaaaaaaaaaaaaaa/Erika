@@ -230,7 +230,7 @@ class AndroidEventPollPolicyTest {
         assertEquals(
             false,
             androidSurfaceOperationNeedsImmediateEventPoll(
-                "setOutputHeadroom",
+                "play",
                 responseOk = true,
             ),
         )

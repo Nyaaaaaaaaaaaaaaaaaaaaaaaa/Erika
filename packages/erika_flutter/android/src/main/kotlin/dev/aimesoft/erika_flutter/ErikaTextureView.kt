@@ -1,28 +1,20 @@
 package dev.aimesoft.erika_flutter
 
-import android.annotation.TargetApi
 import android.content.Context
 import android.graphics.SurfaceTexture
-import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.Display
 import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
-import java.util.function.Consumer
 import kotlin.math.max
 
 internal class ErikaAndroidVideoViewFactory(
     private val plugin: ErikaFlutterPlugin,
-    private val useHdrSurface: Boolean = false,
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         @Suppress("UNCHECKED_CAST")
@@ -32,7 +24,6 @@ internal class ErikaAndroidVideoViewFactory(
             viewId,
             creationParams,
             plugin,
-            useHdrSurface,
         )
     }
 }
@@ -42,17 +33,10 @@ internal class ErikaAndroidVideoView(
     val viewId: Int,
     creationParams: Map<String, Any?>,
     private val plugin: ErikaFlutterPlugin,
-    private val useHdrSurface: Boolean,
 ) : PlatformView,
-    TextureView.SurfaceTextureListener,
-    SurfaceHolder.Callback2 {
-    private val textureView = if (useHdrSurface) null else TextureView(context)
-    private val surfaceView = if (useHdrSurface) SurfaceView(context) else null
-    private val nativeView: View = surfaceView ?: requireNotNull(textureView)
-    private val rawRequestedHdrHeadroom =
-        (creationParams["requestedHdrHeadroom"] as? Number)?.toFloat()
-    private val requestedHdrHeadroom = androidDesiredHdrHeadroom(rawRequestedHdrHeadroom)
-    private val hybridComposition = creationParams["composition"] == "hybrid"
+    TextureView.SurfaceTextureListener {
+    private val textureView = TextureView(context)
+    private val nativeView: View = textureView
     private val videoAlphaMode =
         (creationParams["videoAlphaMode"] as? Number)?.toInt() ?: 0
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -82,14 +66,6 @@ internal class ErikaAndroidVideoView(
     private val surfaceRecoveryTokens = AndroidSurfaceRecoveryTokenSource()
     private val surfaceRecoveryAttempts = AndroidSurfaceRecoveryAttemptTracker()
     private var surfaceRecoveryRunnable: Runnable? = null
-    private var observedHdrDisplay: Display? = null
-    private var hdrRatioListenerRegistered = false
-    private var attachedDisplayId: Int? = null
-    private var attachedDisplayHdrSupported: Boolean? = null
-    private var lastPublishedHdrHeadroom: AndroidHdrHeadroomState? = null
-    private val hdrRatioListener = Consumer<Display> {
-        mainHandler.post { refreshHdrHeadroomObservation() }
-    }
     private val attachStateListener = object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(view: View) {
             mainHandler.post {
@@ -101,46 +77,19 @@ internal class ErikaAndroidVideoView(
                     val attempt = attachIfReady(host)
                     handleImmediateAttempt(host, attempt)
                 }
-                refreshHdrHeadroomObservation()
             }
         }
 
-        override fun onViewDetachedFromWindow(view: View) {
-            stopHdrHeadroomObservation(publishUnknown = true)
-        }
+        override fun onViewDetachedFromWindow(view: View) = Unit
     }
 
     internal val boundPlayerHost: AndroidPlayerHost?
         get() = boundHost
 
-    internal val isExtendedLinearSurface: Boolean
-        get() = useHdrSurface
-
     init {
-        if (rawRequestedHdrHeadroom != null && rawRequestedHdrHeadroom != requestedHdrHeadroom) {
-            Log.w(
-                TAG,
-                "invalid requestedHdrHeadroom=$rawRequestedHdrHeadroom for viewId=$viewId; " +
-                    "using 0 (system auto), expected 0 or [1, 10000]",
-            )
-        }
-        textureView?.apply {
+        textureView.apply {
             isOpaque = videoAlphaMode == 0
             surfaceTextureListener = this@ErikaAndroidVideoView
-        }
-        surfaceView?.apply {
-            holder.setFormat(PixelFormat.RGBA_F16)
-            holder.addCallback(this@ErikaAndroidVideoView)
-            if (Build.VERSION.SDK_INT >= 35) {
-                runCatching { setDesiredHdrHeadroom(requestedHdrHeadroom) }
-                    .onFailure { error ->
-                        Log.w(
-                            TAG,
-                            "setDesiredHdrHeadroom failed viewId=$viewId requested=$requestedHdrHeadroom",
-                            error,
-                        )
-                    }
-            }
         }
         nativeView.addOnAttachStateChangeListener(attachStateListener)
         nativeView.contentDescription = creationParams["debugLabel"] as? String
@@ -167,7 +116,6 @@ internal class ErikaAndroidVideoView(
         if (disposed) {
             return
         }
-        stopHdrHeadroomObservation(publishUnknown = false)
         cancelSurfaceRecovery()
         disposed = true
         failPendingBind(
@@ -180,8 +128,7 @@ internal class ErikaAndroidVideoView(
         unbindRequested = false
         releaseSurface()
         releaseDeferredSurfacesIfIdle()
-        textureView?.surfaceTextureListener = null
-        surfaceView?.holder?.removeCallback(this)
+        textureView.surfaceTextureListener = null
         nativeView.removeOnAttachStateChangeListener(attachStateListener)
         plugin.unregisterVideoView(this)
     }
@@ -221,14 +168,12 @@ internal class ErikaAndroidVideoView(
             }
             boundHost = host
             host.attachedView = this
-            lastPublishedHdrHeadroom = null
             advanceSurfaceBindingGeneration(host)
         }
         unbindRequested = false
         cancelSurfaceRecovery()
         val attempt = attachIfReady(host)
         handleImmediateAttempt(host, attempt)
-        refreshHdrHeadroomObservation()
         plugin.onPlayerRenderStateChanged()
         return attempt.response
     }
@@ -275,7 +220,6 @@ internal class ErikaAndroidVideoView(
             )
         }
         unbindRequested = true
-        stopHdrHeadroomObservation(publishUnknown = true)
         cancelSurfaceRecovery()
         if (!androidUnbindNeedsNewSurfaceDetach(lifecycleDetachPending)) {
             // The already queued lifecycle detach owns this unbind. Its real
@@ -320,7 +264,6 @@ internal class ErikaAndroidVideoView(
             return unbind(host)
         }
         unbindRequested = false
-        stopHdrHeadroomObservation(publishUnknown = true)
         cancelSurfaceRecovery()
         val response = detachNativeSurface(host)
         reportImmediateSurfaceAttempt(host, SurfaceAttempt("detachSurface", response))
@@ -339,14 +282,12 @@ internal class ErikaAndroidVideoView(
             return
         }
         unbindRequested = false
-        // The detach queued below owns the lifecycle transition. Avoid a synchronous
-        // setOutputHeadroom JNI call on the UI thread while the presenter may still be
-        // finishing an in-flight frame.
-        stopHdrHeadroomObservation(publishUnknown = false)
+        // The detach queued below owns the lifecycle transition while the
+        // presenter may still be finishing an in-flight frame.
         cancelSurfaceRecovery()
         if (
             androidShouldRetainSurfaceDuringActivityStop(
-                usesTextureView = textureView != null,
+                usesTextureView = true,
                 outputSurfaceValid = outputSurface?.isValid == true,
             )
         ) {
@@ -378,10 +319,6 @@ internal class ErikaAndroidVideoView(
                 }
                 nativeDetachRetryPending = !response.ok && host.surfaceAttached
                 releaseDeferredSurfacesIfIdle()
-                if (response.ok) {
-                    attachedDisplayId = null
-                    attachedDisplayHdrSupported = null
-                }
                 plugin.reportSurfaceResponse(host, "detachSurface", response)
                 if (!response.ok) {
                     completeUnbindCompletions(host, response)
@@ -431,7 +368,6 @@ internal class ErikaAndroidVideoView(
         cancelSurfaceRecovery()
         val attempt = attachIfReady(host)
         handleImmediateAttempt(host, attempt)
-        refreshHdrHeadroomObservation()
         plugin.onPlayerRenderStateChanged()
         return attempt.response
     }
@@ -495,7 +431,6 @@ internal class ErikaAndroidVideoView(
             Surface(surfaceTexture),
             width,
             height,
-            ownsSurface = true,
             surfaceTexture = surfaceTexture,
         )
     }
@@ -510,45 +445,11 @@ internal class ErikaAndroidVideoView(
 
     override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
 
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        onNativeSurfaceAvailable(
-            holder.surface,
-            nativeView.width,
-            nativeView.height,
-            ownsSurface = false,
-            surfaceTexture = null,
-        )
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        if (outputSurface == null) {
-            onNativeSurfaceAvailable(
-                holder.surface,
-                width,
-                height,
-                ownsSurface = false,
-                surfaceTexture = null,
-            )
-        } else {
-            onNativeSurfaceSizeChanged(width, height)
-        }
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        onNativeSurfaceDestroyed(null)
-    }
-
-    override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
-        boundHost?.requestRender()
-        plugin.onPlayerRenderStateChanged()
-    }
-
     private fun onNativeSurfaceAvailable(
         surface: Surface,
         width: Int,
         height: Int,
-        ownsSurface: Boolean,
-        surfaceTexture: SurfaceTexture?,
+        surfaceTexture: SurfaceTexture,
     ) {
         advanceSurfaceBindingGeneration(boundHost)
         cancelSurfaceRecovery()
@@ -571,7 +472,7 @@ internal class ErikaAndroidVideoView(
             deferOrReleaseSurfaceTexture(previousSurfaceTexture)
         }
         outputSurface = surface
-        ownsOutputSurface = ownsSurface
+        ownsOutputSurface = true
         outputSurfaceTexture = surfaceTexture
         if (!detachResponse.ok) {
             if (host != null) {
@@ -588,7 +489,6 @@ internal class ErikaAndroidVideoView(
             val attempt = attachIfReady(currentHost)
             handleImmediateAttempt(currentHost, attempt)
         }
-        refreshHdrHeadroomObservation()
         plugin.onPlayerRenderStateChanged()
     }
 
@@ -617,35 +517,24 @@ internal class ErikaAndroidVideoView(
             val attempt = attachIfReady(host)
             handleImmediateAttempt(host, attempt)
         }
-        refreshHdrHeadroomObservation()
         plugin.onPlayerRenderStateChanged()
     }
 
-    private fun onNativeSurfaceDestroyed(surfaceTexture: SurfaceTexture?): Boolean {
+    private fun onNativeSurfaceDestroyed(surfaceTexture: SurfaceTexture): Boolean {
         advanceSurfaceBindingGeneration(boundHost)
-        stopHdrHeadroomObservation(publishUnknown = true)
         cancelSurfaceRecovery()
         val host = boundHost
         val response = host?.let { host ->
-            val response = if (surfaceTexture != null) {
-                detachNativeSurface(host)
-            } else {
-                host.detachSurfaceForSystemDestroy()
-            }
-            if (surfaceTexture == null) {
-                plugin.reportSurfaceResponse(host, "detachSurface", response)
-            } else {
-                reportImmediateSurfaceAttempt(
-                    host,
-                    SurfaceAttempt("detachSurface", response),
-                )
-            }
+            val response = detachNativeSurface(host)
+            reportImmediateSurfaceAttempt(
+                host,
+                SurfaceAttempt("detachSurface", response),
+            )
             response
         } ?: NativeResponse.success()
         val decision = androidSurfaceDestroyDecision(response.ok)
-        // A timed-out SurfaceView barrier remains queued on the serial presenter. Keep the
-        // native attachment explicit as well: the serialized retry then observes the first
-        // detach's final state before any replacement attach or unbind can complete.
+        // A timed-out native detach remains queued on the serial presenter.
+        // Its retry observes the first detach before any replacement attach.
         val retryNativeDetach = androidSurfaceDestroyNeedsRetry(
             nativeDetachSucceeded = response.ok,
             hostDestroying = host?.isDestroyed == true,
@@ -655,7 +544,7 @@ internal class ErikaAndroidVideoView(
         if (outputSurfaceTexture === surfaceTexture) {
             outputSurfaceTexture = null
         }
-        surfaceTexture?.let(::deferOrReleaseSurfaceTexture)
+        deferOrReleaseSurfaceTexture(surfaceTexture)
         surfacePixelWidth = 0
         surfacePixelHeight = 0
         if (host != null) {
@@ -687,34 +576,7 @@ internal class ErikaAndroidVideoView(
         if (!surface.isValid) {
             return SurfaceAttempt("attachSurface", NativeResponse.success())
         }
-        val display = nativeView.display
-        if (useHdrSurface && display == null) {
-            Log.i(
-                TAG,
-                "surfaceOutputCapability pending playerId=${host.handle} viewId=$viewId " +
-                    "reason=display_not_attached_yet",
-            )
-            return SurfaceAttempt("attachSurface", NativeResponse.success())
-        }
         val metrics = surfaceMetrics(pixelWidth(), pixelHeight())
-        val displayHdrSupported = display?.let(::displaySupportsHdr) == true
-        val directComposition = useHdrSurface && hybridComposition
-        val outputCapability = androidOutputCapabilityDecision(
-            extendedLinearRequested = useHdrSurface,
-            sdkInt = Build.VERSION.SDK_INT,
-            displayHdrSupported = displayHdrSupported,
-            directComposition = directComposition,
-        )
-        Log.i(
-            TAG,
-            "surfaceOutputCapability playerId=${host.handle} viewId=$viewId " +
-                "requestedExtendedLinear=$useHdrSurface " +
-                "eligible=${outputCapability.extendedLinearEligible} " +
-                "directComposition=$directComposition sdk=${Build.VERSION.SDK_INT} " +
-                "requestedHeadroom=$requestedHdrHeadroom " +
-                "fallbackReason=${androidOutputFallbackReasonLabel(outputCapability.fallbackReason)}" +
-                "(${outputCapability.fallbackReason})",
-        )
         if (nativeAttachPending) {
             return SurfaceAttempt("attachSurface", NativeResponse.success())
         }
@@ -725,10 +587,6 @@ internal class ErikaAndroidVideoView(
             metrics.width,
             metrics.height,
             metrics.scale,
-            outputCapability.extendedLinearEligible,
-            directComposition,
-            requestedHdrHeadroom,
-            outputCapability.fallbackReason,
         ) { result ->
             mainHandler.post {
                 nativeAttachPending = false
@@ -751,8 +609,6 @@ internal class ErikaAndroidVideoView(
                 }
                 if (response.ok) {
                     finishSurfaceRecovery(host, "attachSurface")
-                    attachedDisplayId = display?.displayId
-                    attachedDisplayHdrSupported = displayHdrSupported
                     val latestMetrics = surfaceMetrics(pixelWidth(), pixelHeight())
                     if (boundHost === host && latestMetrics != metrics) {
                         handleImmediateAttempt(host, resizeNativeSurface(host, latestMetrics))
@@ -814,204 +670,6 @@ internal class ErikaAndroidVideoView(
         plugin.onPlayerRenderStateChanged()
     }
 
-    private fun displaySupportsHdr(display: Display): Boolean {
-        // Display.isHdr is derived from getHdrCapabilities(), so it respects
-        // user-disabled HDR output types. Display.Mode.supportedHdrTypes is
-        // only the raw hardware list and can incorrectly keep FP16 output
-        // eligible after the user disables every HDR type.
-        return runCatching { display.isHdr }
-            .onFailure { error ->
-                Log.w(
-                    TAG,
-                    "display HDR capability query failed viewId=$viewId " +
-                        "displayId=${display.displayId}",
-                    error,
-                )
-            }
-            .getOrDefault(false)
-    }
-
-    private fun refreshHdrHeadroomObservation() {
-        if (
-            !useHdrSurface ||
-            Build.VERSION.SDK_INT < 34 ||
-            disposed ||
-            unbindRequested ||
-            disposeRequested ||
-            !plugin.isActivityActive ||
-            !nativeView.isAttachedToWindow
-        ) {
-            stopHdrHeadroomObservation(publishUnknown = true)
-            return
-        }
-        val host = boundHost ?: run {
-            stopHdrHeadroomObservation(publishUnknown = false)
-            return
-        }
-        val display = nativeView.display ?: run {
-            stopHdrHeadroomObservation(publishUnknown = true)
-            return
-        }
-        val displayHdrSupported = displaySupportsHdr(display)
-        val displayCapabilityChanged = host.surfaceAttached &&
-            (attachedDisplayId != display.displayId ||
-                attachedDisplayHdrSupported != displayHdrSupported)
-        if (displayCapabilityChanged) {
-            Log.i(
-                TAG,
-                "surfaceDisplayChanged playerId=${host.handle} viewId=$viewId " +
-                    "oldDisplayId=$attachedDisplayId newDisplayId=${display.displayId} " +
-                    "oldHdr=$attachedDisplayHdrSupported newHdr=$displayHdrSupported " +
-                    "action=detach_and_reattach",
-            )
-            stopHdrHeadroomObservation(publishUnknown = false)
-            val detachResponse = detachNativeSurface(host)
-            reportImmediateSurfaceAttempt(
-                host,
-                SurfaceAttempt("detachSurface", detachResponse),
-            )
-            if (!detachResponse.ok) {
-                startSurfaceRecovery(host, "detachSurface", detachResponse)
-                return
-            }
-            val attachAttempt = attachIfReady(host)
-            handleImmediateAttempt(host, attachAttempt)
-            if (!attachAttempt.response.ok || !host.surfaceAttached) {
-                return
-            }
-        }
-
-        if (observedHdrDisplay !== display) {
-            stopHdrHeadroomObservation(publishUnknown = false)
-            observedHdrDisplay = display
-        }
-        val ratioAvailable = runCatching { display.isHdrSdrRatioAvailable }
-            .onFailure { error ->
-                Log.w(
-                    TAG,
-                    "isHdrSdrRatioAvailable failed playerId=${host.handle} " +
-                        "viewId=$viewId displayId=${display.displayId}",
-                    error,
-                )
-            }
-            .getOrDefault(false)
-        if (ratioAvailable && !hdrRatioListenerRegistered) {
-            runCatching {
-                display.registerHdrSdrRatioChangedListener(
-                    nativeView.context.mainExecutor,
-                    hdrRatioListener,
-                )
-            }.onSuccess {
-                hdrRatioListenerRegistered = true
-            }.onFailure { error ->
-                Log.w(
-                    TAG,
-                    "registerHdrSdrRatioChangedListener failed playerId=${host.handle} " +
-                        "viewId=$viewId displayId=${display.displayId}",
-                    error,
-                )
-            }
-        } else if (!ratioAvailable && hdrRatioListenerRegistered) {
-            stopHdrHeadroomObservation(publishUnknown = false)
-            observedHdrDisplay = display
-        }
-        publishHdrHeadroom(host, display, ratioAvailable)
-    }
-
-    @TargetApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    private fun publishHdrHeadroom(
-        host: AndroidPlayerHost,
-        display: Display,
-        ratioAvailable: Boolean,
-    ) {
-        val ratio = if (ratioAvailable) {
-            runCatching { display.hdrSdrRatio }.getOrElse { error ->
-                Log.w(
-                    TAG,
-                    "getHdrSdrRatio failed playerId=${host.handle} viewId=$viewId " +
-                        "displayId=${display.displayId}",
-                    error,
-                )
-                Float.NaN
-            }
-        } else {
-            Float.NaN
-        }
-        val state = androidHdrHeadroomState(ratioAvailable, ratio)
-        if (lastPublishedHdrHeadroom == state) {
-            return
-        }
-        val posted = host.setOutputHeadroomAsync(state.headroom, state.known) { result ->
-            mainHandler.post {
-                if (boundHost !== host || host.isDestroyed) {
-                    return@post
-                }
-                val response = result.getOrElse { error ->
-                    surfaceOperationException(host, "setOutputHeadroom", error)
-                }
-                if (!response.ok) {
-                    plugin.reportSurfaceResponse(host, "setOutputHeadroom", response)
-                } else {
-                    lastPublishedHdrHeadroom = state
-                }
-                Log.i(
-                    TAG,
-                    "surfaceHeadroom playerId=${host.handle} viewId=$viewId " +
-                        "displayId=${display.displayId} ratio=${state.headroom} " +
-                        "known=${state.known} requested=$requestedHdrHeadroom " +
-                        "status=${response.status} error=${response.error.orEmpty()}",
-                )
-            }
-        }
-        if (!posted) {
-            plugin.reportSurfaceResponse(
-                host,
-                "setOutputHeadroom",
-                NativeResponse(false, -1, "Android presenter thread is unavailable", null),
-            )
-        }
-    }
-
-    private fun stopHdrHeadroomObservation(publishUnknown: Boolean) {
-        val display = observedHdrDisplay
-        if (Build.VERSION.SDK_INT >= 34 && hdrRatioListenerRegistered && display != null) {
-            runCatching { display.unregisterHdrSdrRatioChangedListener(hdrRatioListener) }
-                .onFailure { error ->
-                    Log.w(
-                        TAG,
-                        "unregisterHdrSdrRatioChangedListener failed viewId=$viewId " +
-                            "displayId=${display.displayId}",
-                        error,
-                    )
-                }
-        }
-        hdrRatioListenerRegistered = false
-        observedHdrDisplay = null
-        if (publishUnknown && useHdrSurface) {
-            boundHost?.let { host ->
-                val unknown = AndroidHdrHeadroomState(1f, false)
-                if (lastPublishedHdrHeadroom == unknown) {
-                    return@let
-                }
-                host.setOutputHeadroomAsync(unknown.headroom, unknown.known) { result ->
-                    mainHandler.post {
-                        if (boundHost !== host || host.isDestroyed) {
-                            return@post
-                        }
-                        val response = result.getOrElse { error ->
-                            surfaceOperationException(host, "setOutputHeadroom", error)
-                        }
-                        if (response.ok) {
-                            lastPublishedHdrHeadroom = unknown
-                        } else {
-                            plugin.reportSurfaceResponse(host, "setOutputHeadroom", response)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private fun detachNativeSurface(host: AndroidPlayerHost): NativeResponse {
         if ((!host.surfaceAttached && !nativeAttachPending) || host.isDestroyed) {
             return NativeResponse.success()
@@ -1029,8 +687,6 @@ internal class ErikaAndroidVideoView(
                 nativeDetachRetryPending = !response.ok && host.surfaceAttached
                 if (response.ok) {
                     finishSurfaceRecovery(host, "detachSurface")
-                    attachedDisplayId = null
-                    attachedDisplayHdrSupported = null
                 }
                 plugin.reportSurfaceResponse(host, "detachSurface", response)
                 releaseDeferredSurfacesIfIdle()
@@ -1393,17 +1049,6 @@ internal class ErikaAndroidVideoView(
             "surfaceRecoverySucceeded playerId=${host.handle} viewId=$viewId " +
                 "operation=$operation generation=$generation",
         )
-        if (
-            androidShouldRefreshHdrHeadroomAfterRecovery(
-                hostStillBound = boundHost === host,
-                surfaceAttached = host.surfaceAttached,
-                disposed = disposed,
-                disposeRequested = disposeRequested,
-                unbindRequested = unbindRequested,
-            )
-        ) {
-            refreshHdrHeadroomObservation()
-        }
     }
 
     private fun completeUnbind(host: AndroidPlayerHost) {
@@ -1411,7 +1056,6 @@ internal class ErikaAndroidVideoView(
             return
         }
         val deferredBind = takePendingBind()
-        stopHdrHeadroomObservation(publishUnknown = false)
         cancelSurfaceRecovery()
         nativeDetachRetryPending = false
         if (host.attachedView === this) {
@@ -1420,7 +1064,6 @@ internal class ErikaAndroidVideoView(
         if (boundHost === host) {
             boundHost = null
         }
-        lastPublishedHdrHeadroom = null
         unbindRequested = false
         lifecycleSurfaceSuspended = false
         completeUnbindCompletions(host, NativeResponse.success())

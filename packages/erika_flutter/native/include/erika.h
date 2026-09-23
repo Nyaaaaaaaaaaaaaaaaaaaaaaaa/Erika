@@ -505,6 +505,9 @@ typedef struct ErikaPresenterStats {
  * process-unique non-zero id and can be cancelled from another thread. Image
  * handles are synchronized registry ids: destroy closes the id, waits for
  * active calls, detaches any surface, and releases the decoded frame. */
+/* Shared process-wide allocator for every static-image caller. Results fit a
+ * positive signed 64-bit integer; zero means exhausted. */
+uint64_t erika_image_allocate_operation_id(void);
 ErikaStatus erika_image_decode_uri(
     uint64_t operation_id,
     const char *uri,

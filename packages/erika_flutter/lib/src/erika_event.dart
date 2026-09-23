@@ -1,5 +1,3 @@
-import 'erika_player.dart';
-
 enum ErikaPlaybackState {
   idle,
   opening,
@@ -26,29 +24,6 @@ enum ErikaEventKind {
   videoDecoderChanged,
   audioOutputChanged,
   systemMediaNavigationRequested,
-  outputStatusChanged,
-}
-
-/// Stable resource/output dynamic-range values shared with Cloud and App.
-enum ErikaDynamicRange {
-  unknown(0, 'unknown'),
-  sdr(1, 'sdr'),
-  hdr10Pq(2, 'hdr10_pq'),
-  hlg(3, 'hlg'),
-  ultraHdrGainMap(4, 'ultra_hdr_gain_map');
-
-  const ErikaDynamicRange(this.nativeValue, this.wireValue);
-
-  final int nativeValue;
-  final String wireValue;
-
-  static ErikaDynamicRange fromNativeValue(int value) => switch (value) {
-    1 => ErikaDynamicRange.sdr,
-    2 => ErikaDynamicRange.hdr10Pq,
-    3 => ErikaDynamicRange.hlg,
-    4 => ErikaDynamicRange.ultraHdrGainMap,
-    _ => ErikaDynamicRange.unknown,
-  };
 }
 
 enum ErikaSystemMediaCommand { previous, next }
@@ -393,7 +368,6 @@ class ErikaPlayerEvent {
     this.decoder,
     this.audio,
     this.systemMediaCommand,
-    this.outputStatus,
   });
 
   factory ErikaPlayerEvent.fromMap(Map<dynamic, dynamic> map) {
@@ -430,10 +404,6 @@ class ErikaPlayerEvent {
         'next' => ErikaSystemMediaCommand.next,
         _ => null,
       },
-      outputStatus: switch (map['outputStatus']) {
-        final Map<dynamic, dynamic> value => ErikaOutputStatus.fromMap(value),
-        _ => null,
-      },
     );
   }
 
@@ -453,9 +423,6 @@ class ErikaPlayerEvent {
   final ErikaVideoDecoderInfo? decoder;
   final ErikaAudioOutputInfo? audio;
   final ErikaSystemMediaCommand? systemMediaCommand;
-
-  /// Complete, de-duplicated output snapshot for `outputStatusChanged`.
-  final ErikaOutputStatus? outputStatus;
 
   static int _asInt(Object? value) {
     if (value is int) {

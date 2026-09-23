@@ -3,16 +3,11 @@ package dev.aimesoft.erika_flutter
 import android.view.Surface
 import java.util.concurrent.atomic.AtomicLong
 
-internal const val ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS = 250L
-
 internal class AndroidPlayerHost(
     val handle: Long,
-    val requestedOutputMode: Int,
     allowBackgroundPlayback: Boolean,
     private val presenterThread: AndroidPresenterThread,
 ) {
-    val requiresExtendedLinearSurface: Boolean
-        get() = requestedOutputMode == 2
     var attachedView: ErikaAndroidVideoView? = null
     private val playbackTracker = AndroidPlaybackTracker()
     private val contentGenerationTracker = AndroidContentGenerationTracker()
@@ -200,10 +195,6 @@ internal class AndroidPlayerHost(
         width: Int,
         height: Int,
         scale: Double,
-        extendedLinear: Boolean,
-        directComposition: Boolean,
-        desiredHeadroom: Float,
-        fallbackReason: Int,
     ): NativeResponse {
         check(!destroyed) { "Erika player $handle has been destroyed" }
         val response = presenterThread.call {
@@ -214,10 +205,6 @@ internal class AndroidPlayerHost(
                     width,
                     height,
                     scale,
-                    extendedLinear,
-                    directComposition,
-                    desiredHeadroom,
-                    fallbackReason,
                 ),
             )
         }
@@ -232,10 +219,6 @@ internal class AndroidPlayerHost(
         width: Int,
         height: Int,
         scale: Double,
-        extendedLinear: Boolean,
-        directComposition: Boolean,
-        desiredHeadroom: Float,
-        fallbackReason: Int,
         onComplete: (Result<NativeResponse>) -> Unit,
     ): Boolean = presenterThread.post {
         onComplete(
@@ -245,10 +228,6 @@ internal class AndroidPlayerHost(
                     width,
                     height,
                     scale,
-                    extendedLinear,
-                    directComposition,
-                    desiredHeadroom,
-                    fallbackReason,
                 )
             },
         )
@@ -278,23 +257,6 @@ internal class AndroidPlayerHost(
         onComplete(runCatching { resizeSurface(width, height, scale) })
     }
 
-    fun setOutputHeadroom(headroom: Float, known: Boolean): NativeResponse =
-        invoke(
-            "setOutputHeadroom",
-            mapOf(
-                "headroom" to headroom,
-                "known" to known,
-            ),
-        )
-
-    fun setOutputHeadroomAsync(
-        headroom: Float,
-        known: Boolean,
-        onComplete: (Result<NativeResponse>) -> Unit,
-    ): Boolean = presenterThread.post {
-        onComplete(runCatching { setOutputHeadroom(headroom, known) })
-    }
-
     fun detachSurface(): NativeResponse {
         if (!surfaceAttached || destroyed) {
             return NativeResponse.success()
@@ -317,52 +279,6 @@ internal class AndroidPlayerHost(
         onComplete: (Result<NativeResponse>) -> Unit,
     ): Boolean = presenterThread.post {
         onComplete(runCatching(::detachSurface))
-    }
-
-    /**
-     * SurfaceHolder invalidates its Surface as soon as surfaceDestroyed returns. Place the
-     * native detach behind already queued presenter work and wait for a short, bounded
-     * lifecycle barrier. Keep native attachment state until success so a timeout or failure
-     * cannot let replacement binding skip the serialized retry.
-     */
-    fun detachSurfaceForSystemDestroy(): NativeResponse {
-        if (destroyed) {
-            if (!nativeDestroyPending) {
-                return NativeResponse.success()
-            }
-            return try {
-                // nativeDestroy is already queued on the same serial owner. A no-op
-                // barrier therefore proves it has finished dropping the Surface.
-                presenterThread.callForSurfaceDestroy(ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS) { Unit }
-                NativeResponse.success()
-            } catch (error: Throwable) {
-                NativeResponse(
-                    false,
-                    -1,
-                    error.message ?: "Unable to retire Android SurfaceView output",
-                    null,
-                )
-            }
-        }
-        if (!surfaceAttached) {
-            return NativeResponse.success()
-        }
-        val response = try {
-            presenterThread.callForSurfaceDestroy(ANDROID_SURFACE_DESTROY_TIMEOUT_MILLIS) {
-                NativeJson.decodeResponse(ErikaNative.nativeDetachSurface(handle))
-            }
-        } catch (error: Throwable) {
-            NativeResponse(
-                false,
-                -1,
-                error.message ?: "Unable to detach Android SurfaceView output",
-                null,
-            )
-        }
-        if (response.ok) {
-            playbackTracker.detachSurface()
-        }
-        return response
     }
 
     fun renderTick(timeSeconds: Double): NativeResponse {

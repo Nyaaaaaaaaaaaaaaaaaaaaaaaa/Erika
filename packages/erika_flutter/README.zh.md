@@ -9,7 +9,7 @@ Erika 媒体播放引擎的 Flutter plugin。
 插件让 Dart 不进入热路径：
 
 - Dart 只暴露低频播放器命令和事件流。
-- 原生插件提供两种 surface：推荐的 `ErikaWindowOverlayVideoView`（macOS/iOS/tvOS 为 Metal，Windows 为 D3D11 swapchain），以及 platform view 用的 `ErikaVideoView`。Android 上两者都通过同一套原生 view 选择器：SDR 使用真实 `TextureView`，请求 extended-linear 时使用 Hybrid Composition `SurfaceView`。
+- 原生插件提供两种 surface：推荐的 `ErikaWindowOverlayVideoView`（macOS/iOS/tvOS 为 Metal，Windows 为 D3D11 swapchain），以及 platform view 用的 `ErikaVideoView`。Android 视频使用原生 `TextureView`。
 - macOS 插件加载 Erika 动态库。
 - iOS 插件链接 Erika 静态库。
 - tvOS 插件链接 Erika 静态库，并在 Apple TV platform view 中承载 Metal layer。
@@ -24,7 +24,7 @@ Erika 媒体播放引擎的 Flutter plugin。
 
 Windows 上 `ErikaWindowOverlayVideoView` 以 sibling surface 的形式托管一个 window-level Direct3D 11 swapchain，遵循同样的 overlay 模型。
 
-需要标准 Flutter platform view 时则使用 `ErikaVideoView`。Android 的 SDR 视频 surface 是原生 `TextureView`；`ErikaOutputMode.extendedLinear` player 则通过 `PlatformViewLink`/Hybrid Composition 创建 `SurfaceView`，因为 scRGB 不能经过 Flutter texture-layer composition。插件把借用的 `Surface` 交给 Erika，并完整处理创建、resize、销毁、音频焦点、HDR eligibility 和 vsync tick。
+需要标准 Flutter platform view 时则使用 `ErikaVideoView`。Android 视频 surface 是原生 `TextureView`。插件把借用的 `Surface` 交给 Erika，并处理创建、resize、销毁、音频焦点和 vsync tick。
 
 ## macOS Setup
 
@@ -182,11 +182,7 @@ Android `content://` 媒体和字幕 URI 会通过 `ContentResolver` 打开并 d
 
 Android 使用 MediaSession 和媒体通知接入锁屏、蓝牙耳机及系统媒体面板。`allowBackgroundPlayback: true` 时会启动 `mediaPlayback` 前台 Service，并在后台仅驱动音频；插件 Manifest 已声明前台服务和 Android 13+ 通知权限，但宿主应用仍需按产品流程向用户请求 `POST_NOTIFICATIONS` 运行时权限。该权限被拒绝时，系统媒体会话仍可工作，但通知展示取决于 Android 版本和系统策略。
 
-Android 最低版本仍为 API 26。Extended-linear 还要求 native-window dataspace API（API
-28+）；API 26/27 会继续 SDR 播放并报告对应 fallback。API 34+ 上，插件会监听
-`Display.registerHdrSdrRatioChangedListener`，把真实 ratio 变化发布给 Erika，让 wgpu 无需
-重新 attach surface 就能更新后续帧 target 和输出状态。API 35 上插件还会按
-`SurfaceView` 设置 desired HDR headroom，不修改宿主的全局 Window。
+Android 最低版本仍为 API 26，支持范围内的视频输出统一为 SDR。
 
 ## HarmonyOS Setup
 
@@ -198,16 +194,35 @@ HarmonyOS NEXT 5.1 / API 18。CMake 默认下载并校验
 HarmonyOS 使用 AVSession 发布媒体元数据、封面、播放状态、进度和倍速，并接收系统播放、暂停、停止及进度调整命令。
 
 HarmonyOS NEXT 上请使用 `ErikaVideoView`。它把 XComponent/Flutter surface 取为
-`OHNativeWindow`；prefer-HDR 会先验证 RGBA_1010102、BT.2020 PQ、HDR10 元数据与白点，
-再通过 wgpu Vulkan 渲染，失败则显式回退 RGBA8888/sRGB。DisplaySoloist 负责 VSync，
+`OHNativeWindow`，使用 RGBA8888/sRGB 输出。DisplaySoloist 负责 VSync，
 不再用 `setInterval` 驱动画面。音频走 OHAudio，交错 f32 PCM。
 
 此 AV1/AVIF 专用 fork 在 HarmonyOS 上只查询硬件类别的 `video/av1` AVCodec
 capability，校验编码尺寸后用返回的 codec name 创建 decoder；不会选择系统推荐的
 软件 AVCodec。无硬件能力、尺寸不支持或打开/运行失败时直接回退 dav1d。Surface
-输出走 NativeBuffer/Vulkan，AVCodec buffer 输出与 dav1d 走 CPU upload；静态 AVIF
-只解码一次并保留最后帧，静态 HEIF 走 HEVC fallback。Ultra HDR JPEG 当前可靠显示
-SDR base image；gain-map 重建未完成前不会误报 `hdrOutputConfirmed`。
+输出走 NativeBuffer/Vulkan，AVCodec buffer 输出与 dav1d 走 CPU upload；这套硬件
+策略仅用于视频。静态 AVIF、HEIF、JPEG 走独立的软件解码与 SDR RGBA 路径，由
+Flutter 的 `Image` 和 `ImageCache` 呈现，静态 HDR surface 不再提供。
+
+## 静态图片
+
+将已下载的本地文件交给 `ErikaFileImage`，再像普通 Flutter 图片一样使用：
+
+```dart
+Image(
+  image: ErikaFileImage(
+    path: cachedPath,
+    cacheKey: stableResourceRevision,
+    maximumDecodeExtent: 2048,
+  ),
+  fit: BoxFit.cover,
+)
+```
+
+下载、鉴权、磁盘缓存由应用管理。文件内容变化时更换 `cacheKey`；仅签名 URL 更新而
+内容不变时可以沿用。`maximumDecodeExtent` 是解码后的物理像素宽高上限，不能依赖
+`ResizeImage` 限制原始 RGBA 解码。Erika 在工作 isolate 中调用 C ABI 并释放原生
+像素缓冲区；Flutter 管理最终 `ui.Image` 的缓存和绘制。
 
 ## HTTP 请求头
 
@@ -248,79 +263,9 @@ await player.open(
 native 的 2 MiB 默认值。本地文件忽略此参数。0.1.7 或更早的 native library 不包含新的
 options 入口，因此请求预读调参时会抛出明确错误，而不会静默丢弃设置。
 
-## Output Mode
+## SDR 视频输出
 
-`ErikaOutputMode.preferHdr` 是跨平台的“尽可能使用 HDR”请求。Erika 只解析一次该请求，
-并让原生 player 创建和 Flutter 视频 surface 共用同一输出契约：Android 使用 FP16
-extended-linear scRGB 的 Hybrid Composition `SurfaceView`，Apple 使用 Apple EDR。
-
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.preferHdr,
-  edrHeadroom: 4.0,
-);
-```
-
-使用 `ErikaOutputMode.sdr` 可强制 SDR 输出。平台专用的 `appleEdr` 与
-`extendedLinear` 仍为自定义宿主保留兼容性；普通应用应使用 `auto`、`preferHdr` 或 `sdr`。
-
-Android 的高 headroom 模式是 FP16 **extended-linear scRGB**，不是 HDR10/PQ：
-
-`edrHeadroom` 是内容 headroom 上限。Extended-linear player 未传该参数时，Erika 使用默认
-4x 内容上限，同时给 `SurfaceView` 传 desired headroom `0`（系统 auto）。显式值在 API 35
-上还会作为 per-`SurfaceView` desired headroom。显示器当前 HDR/SDR ratio 可用时，会进一步
-约束 wgpu 的有效 target。
-
-只有显示器/surface 支持 HDR、view 是 Hybrid Composition `SurfaceView`、wgpu 选择
-Vulkan、surface 暴露 `Rgba16Float`，且配置后的 native window 回读为
-`ADATASPACE_SCRGB_LINEAR`（`406913024`、`0x18410000`）时，该模式才会激活。GLES、
-`TextureView`、缺少 FP16 或 dataspace 验证失败都会明确回退 SDR。Android scRGB 使用
-BT.709 primaries，`1.0 = 80 nit`；不使用 PQ 或 HDR10 metadata。
-
-始终查询协商结果，不要把请求值当成实际输出：
-
-```dart
-final status = await player.getOutputStatus();
-if (!status.extendedLinearActive) {
-  debugPrint(
-    'Erika output fallback: '
-    '${status.fallbackReason.label} (${status.fallbackReason.nativeValue})',
-  );
-}
-```
-
-`ErikaOutputStatus` 有 13 个字段：`requestedMode`、`activeEncoding`、
-`surfaceFormat`、`nativeDataSpace`、`requestedHeadroom`、`activeHeadroom`、
-`activeHeadroomKnown`、`extendedLinearActive`、`fallbackReason`、
-`fallbackCount`、`dataSpaceFailures`、`headroomUpdates`、
-`extendedLinearFrames`。Android scRGB 真正激活时为
-`androidExtendedLinearScRgb + sixteenBitFloat + nativeDataSpace 406913024`。
-API 34+ 上，Android 暴露有效 ratio 时，`activeHeadroom` 是当前显示器 HDR/SDR ratio，
-`activeHeadroomKnown` 为 true；ratio 不可用时，该值只是 fallback，
-`activeHeadroomKnown` 为 false。只有 known 状态或 ratio 真实变化时，`headroomUpdates`
-才增长；重复 listener 通知会被忽略。
-
-`ErikaOutputFallbackReason` 是稳定 ABI 数值：
-
-| 码 | Dart 值 | 稳定 label |
-|----|---------|------------|
-| 0 | `none` | `none` |
-| 1 | `displayHdrUnsupported` | `display_hdr_unsupported` |
-| 2 | `hybridCompositionRequired` | `hybrid_composition_required` |
-| 3 | `wgpuBackendNotVulkan` | `wgpu_backend_not_vulkan` |
-| 4 | `rgba16FloatSurfaceFormatUnavailable` | `rgba16float_surface_format_unavailable` |
-| 5 | `nativeWindowDataSpaceApiUnavailable` | `native_window_dataspace_api_unavailable` |
-| 6 | `scrgbDataSpaceVerificationFailed` | `scrgb_dataspace_verification_failed` |
-| 7 | `surfaceConfigureFailed` | `surface_configure_failed` |
-| 8 | `legacyAppleEdrUnsupported` | `legacy_apple_edr_unsupported` |
-
-`player.screenshot()` 返回当前合成帧（视频 + 字幕 + 弹幕）的原始 SDR RGBA8；即使显示为
-Apple EDR 或 Android extended-linear 也一样。Metal 与 Android/wgpu 已实现截图；当前
-Windows D3D11 Flutter 路径不返回截图字节。
-
-非 HDR 模拟器/设备覆盖验证的是明确 SDR 回退及其 reason。Active extended-linear 尚不宣称
-已通过真机验证；仍需在 API 35 HDR 真机上验收 `Rgba16Float + SCRGB_LINEAR`、旋转/前后台
-恢复、动态 HDR/SDR ratio 更新、多 player 和 SDR 截图。
+`ErikaPlayer` 固定请求原生 SDR 输出。已编码为 HDR 的 AV1 视频仍可播放：Erika 按源色彩元数据解码，并将画面映射到 SDR。Android 只使用普通的 `erika_flutter/video_view` TextureView。Flutter 接口不再提供 HDR 输出模式、headroom 或 HDR 能力开关。
 
 ## Upscaler
 

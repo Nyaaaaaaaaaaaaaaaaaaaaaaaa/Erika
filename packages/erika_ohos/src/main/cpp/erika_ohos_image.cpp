@@ -141,20 +141,6 @@ std::atomic<uint64_t> g_decode_count{0};
 std::atomic<uint64_t> g_cancelled_queued{0};
 std::atomic<uint64_t> g_active_handles{0};
 std::atomic<uint64_t> g_hdr_reservations{0};
-std::atomic<uint64_t> g_next_native_operation_id{1};
-
-uint64_t NextNativeOperationId() {
-  // ArkTS ids restart with each environment, while C cancellation state is
-  // process-global. A process-unique token prevents a retiring environment's
-  // cancellation tombstone from affecting the next environment.
-  uint64_t operation_id =
-      g_next_native_operation_id.fetch_add(1, std::memory_order_relaxed);
-  if (operation_id == 0) {
-    operation_id =
-        g_next_native_operation_id.fetch_add(1, std::memory_order_relaxed);
-  }
-  return operation_id;
-}
 
 bool TryReserveHdrImage() {
   uint64_t expected = 0;
@@ -754,7 +740,14 @@ napi_value NativeDecodeImage(napi_env env, napi_callback_info info, bool hdr) {
   work->env = env;
   work->runtime_generation = runtime_generation;
   work->client_operation_id = operation_id;
-  work->native_operation_id = NextNativeOperationId();
+  work->native_operation_id = erika_image_allocate_operation_id();
+  if (work->native_operation_id == 0) {
+    bool reservation_held = hdr;
+    ReleaseHdrReservation(&reservation_held);
+    delete work;
+    return RejectedPromise(env, ErikaImageErrorKind_ResourceLimit,
+                           "Static image operation ID space is exhausted");
+  }
   work->path = path;
   work->hdr = hdr;
   work->hdr_reservation_held = hdr;

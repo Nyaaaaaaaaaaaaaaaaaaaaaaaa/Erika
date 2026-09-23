@@ -8,8 +8,6 @@ import android.util.Log
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.FutureTask
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal fun androidPresenterCallMustBeAsync(
@@ -72,46 +70,6 @@ internal class AndroidPresenterThread(
                 is RuntimeException -> throw cause
                 is Error -> throw cause
                 else -> throw IllegalStateException("Android presenter task failed", cause)
-            }
-        }
-    }
-
-    /**
-     * SurfaceView does not let its owner retain the underlying buffer queue after
-     * surfaceDestroyed returns. Queue a native detach behind earlier presenter work and
-     * wait for only this lifecycle boundary; regular rendering never uses this path.
-     *
-     * A timed-out task deliberately remains queued. This stops the UI thread from waiting
-     * indefinitely behind a slow Open while still ensuring native eventually drops the
-     * retired window before any subsequently posted render work.
-     */
-    fun <T> callForSurfaceDestroy(timeoutMillis: Long, block: () -> T): T {
-        if (isOwnerThread) {
-            return block()
-        }
-        check(Looper.myLooper() === Looper.getMainLooper()) {
-            "Surface destroy barriers may only wait from Android's UI thread"
-        }
-        check(timeoutMillis > 0L) { "Surface destroy timeout must be positive" }
-        check(!closed.get()) { "Android presenter thread is closed" }
-        val task = FutureTask(Callable(block))
-        check(handler.post(task)) { "Android presenter thread rejected a surface destroy barrier" }
-        return try {
-            task.get(timeoutMillis, TimeUnit.MILLISECONDS)
-        } catch (error: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw IllegalStateException("Interrupted while detaching an Android surface", error)
-        } catch (error: TimeoutException) {
-            throw IllegalStateException(
-                "Timed out after ${timeoutMillis}ms detaching an Android surface",
-                error,
-            )
-        } catch (error: ExecutionException) {
-            val cause = error.cause ?: error
-            when (cause) {
-                is RuntimeException -> throw cause
-                is Error -> throw cause
-                else -> throw IllegalStateException("Android surface detach failed", cause)
             }
         }
     }

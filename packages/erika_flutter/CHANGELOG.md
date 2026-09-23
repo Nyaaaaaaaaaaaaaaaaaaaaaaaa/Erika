@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-- Resolved `preferHdr` once for native player creation and Android video-surface
-  selection, so a preferred HDR player uses the matching Hybrid-Composition
-  FP16 SurfaceView instead of an incompatible SDR TextureView.
-- Made static-image readiness independent from HDR confirmation: image
-  presentation callbacks now report HDR only after the native surface confirms
-  HDR output.
-- Added HarmonyOS NEXT static-image support through a typed Flutter external
-  texture bridge, with policy-backed decode limits, explicit SDR fallback, and
-  post-render `hdrOutputConfirmed` status.
+- Made Flutter video playback SDR-only, including older HDR-encoded AV1 sources
+  tone-mapped to SDR. Removed public HDR output modes, capability queries,
+  headroom settings, output-status payloads, and the Android HDR view path.
+- Replaced static-image Texture and HDR surface presentation with
+  `ErikaFileImage`, a bounded SDR `ImageProvider` for Flutter `Image` and
+  `ImageCache`. Decoding, cancellation, and RGBA ownership now use Erika's C
+  ABI through a worker isolate on Android, iOS, and HarmonyOS NEXT.
+- Removed the obsolete `ErikaImage.file` widget and static-image method-channel
+  pipeline.
 
 ## 0.2.0 - 2026-09-03
 

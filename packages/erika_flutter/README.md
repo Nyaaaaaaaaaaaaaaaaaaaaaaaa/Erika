@@ -11,9 +11,7 @@ The plugin keeps Dart out of the hot path:
 - The native plugins expose two surface strategies: `ErikaWindowOverlayVideoView`
   for the recommended window-hosted overlay path (Metal on macOS/iOS/tvOS, a D3D11
   swapchain on Windows), and `ErikaVideoView` for platform-view embedding. On
-  Android both widgets route through the same native-view selector: SDR uses a
-  real `TextureView`, while requested extended-linear output uses a
-  `SurfaceView` with Hybrid Composition.
+  Android, video uses a native `TextureView`.
 - The macOS plugin loads the Erika dynamic library.
 - The iOS plugin links the Erika static library.
 - The tvOS plugin links the Erika static library and hosts its Metal layer in an
@@ -38,12 +36,9 @@ swapchain as a sibling surface, following the same overlay model.
 Use `ErikaVideoView` when a standard Flutter platform view is required for a
 small embedder, compatibility path, or diagnostics.
 
-On Android the SDR video surface is a native `TextureView`. An
-`ErikaOutputMode.extendedLinear` player instead creates a `SurfaceView` through
-`PlatformViewLink`/Hybrid Composition, because scRGB must bypass Flutter's
-texture-layer composition. The plugin forwards the borrowed `Surface` to Erika
-and handles creation, resize, destruction, audio focus, HDR eligibility, and
-vsync ticks.
+On Android the video surface is a native `TextureView`. The plugin forwards its
+borrowed `Surface` to Erika and handles creation, resize, destruction, audio
+focus, and vsync ticks.
 
 ## macOS Setup
 
@@ -254,13 +249,8 @@ at runtime as appropriate for its product flow. If permission is denied, the
 media session remains available while notification visibility depends on the
 Android version and system policy.
 
-Android's minimum remains API 26. Extended-linear output additionally needs the
-native-window dataspace API (API 28+); API 26/27 continue in SDR and report the
-specific fallback. On API 34+, the plugin observes
-`Display.registerHdrSdrRatioChangedListener` and publishes real ratio changes
-to Erika, allowing wgpu to update subsequent frame targets and output status
-without reattaching the surface. On API 35 it also applies per-`SurfaceView`
-desired HDR headroom without changing the host window globally.
+Android's minimum remains API 26. Video output is SDR across supported API
+levels.
 
 ## HarmonyOS Setup
 
@@ -285,35 +275,20 @@ directly to dav1d. Surface output uses the NativeBuffer/Vulkan path; AVCodec
 buffer output and dav1d use CPU upload. This policy applies to video playback.
 
 Static AVIF uses a separate decode-once path: one AV1 frame is decoded with the
-software decoder into CPU-readable planes, without creating a player or
-querying AVCodec. SDR output is registered as a Flutter external texture;
-Android renders directly to a `SurfaceProducer`, while iOS keeps the bounded
-pixel buffer on the native side. Whole-image RGBA bytes never cross the Flutter
-method channel. HDR/EDR output presents the retained frame on the platform HDR
-surface. Hardware video-decoder diagnostics therefore do not describe static
-AVIF decoding.
+software decoder into CPU-readable planes, without creating a video player or
+querying AVCodec. `ErikaFileImage` requests bounded SDR RGBA through Erika's C
+ABI and hands the resulting `ui.Image` to Flutter's normal `Image` and
+`ImageCache` pipeline. Decoding and native RGBA ownership stay on a worker
+isolate; the plugin releases every native buffer and handle after transferring
+the pixels. Static and video output both use SDR.
 
-The public image API owns capability checks, decode cancellation, HDR/SDR
-selection, native handles, textures, and release ordering. It reads the decoded
-file metadata: HDR is shown automatically when the device supports an HDR
-surface, otherwise the same source is rendered as SDR. There is no HDR switch
-for the caller. `onReady` means that a surface is ready; HDR presentation is
-reported only through a native-confirmed `onPresentationChanged` callback.
-
-On HarmonyOS NEXT, static images use a separate Flutter external texture rather
-than an Android platform view. The bridge creates an `OHNativeWindow`, requests
-the verified PQ/10-bit surface only for HDR source metadata, and returns the
-native render result before invoking `onPresentationChanged`. If any native
-surface check fails, the same retained frame is rendered on the explicit SDR
-fallback. `hdrSurfaceSupported` means this native path is available; only
-`onPresentationChanged(ErikaImagePresentation.hdr)` confirms an HDR frame was
-actually presented. The HarmonyOS bridge serializes static decoding, so callers
-must keep `ErikaImagePolicy.maxConcurrentDecodes` at `1` on that platform; the
-reported capabilities expose the same limit. A Flutter static-image Texture
-(including an explicit SDR fallback) retains one native surface, so HarmonyOS
-allows one active static surface at a time and reports
-`maxActiveImageSurfaces: 1`. Idle SDR Texture caching is disabled on HarmonyOS
-so an invisible fallback cannot reserve that slot ahead of the next image.
+The provider takes a local file path. Download, authentication, disk caching,
+and resource revision are application concerns. Change `cacheKey` when the
+file contents change; a refreshed signed URL for the same content may keep the
+same key. `maximumDecodeExtent` bounds both decoded physical dimensions. Pass
+the provider to `Image` to use Flutter's fit, clipping, semantics, frame, and
+error APIs. `ResizeImage` does not resize Erika's raw RGBA decode, so choose
+the bound on `ErikaFileImage` itself.
 
 The Flutter bridge is intentionally packaged with `erika_flutter`, rather than
 linking the standalone `erika_ohos` OHPM module. Each package is independently
@@ -328,26 +303,26 @@ Future<void> main() async {
       maxSourcePixels: 32 * 1024 * 1024,
       maxOutputPixels: 32 * 1024 * 1024,
       maxConcurrentDecodes: 2,
-      maxIdleTextureBytes: 32 * 1024 * 1024,
     ),
   );
   runApp(const App());
 }
 
-ErikaImage.file(
-  cachedPath,
-  cacheKey: stableResourceKey,
+Image(
+  image: ErikaFileImage(
+    path: cachedPath,
+    cacheKey: stableResourceKey,
+    maximumDecodeExtent: 2048,
+  ),
   fit: BoxFit.cover,
-  maxDecodeExtent: 2048,
 )
 ```
 
 `ErikaImagePolicy` makes encoded/source/output limits, parser work, timeout,
-queueing, concurrency, texture-cache budget, background trimming, and physical
-decode buckets application-owned policy. The native hard ceiling for source and
-output size is 32 Mi pixels. This is an upper limit, not a request to allocate a
-32 Mi-pixel texture: `ErikaImage.file` normally decodes to its physical layout
-size, additionally bounded by `maxDecodeExtent` when supplied.
+queueing, concurrency, and physical decode buckets application-owned policy.
+The native hard ceiling for source and output size is 32 Mi pixels. This is an
+upper limit, not a request to allocate a 32 Mi-pixel image: each provider
+specifies its own `maximumDecodeExtent`.
 
 ## HTTP Headers
 
@@ -395,89 +370,9 @@ ignore this option. A native library from 0.1.7 or earlier does not export the
 options entry point, so requesting read-ahead with one throws a descriptive
 error instead of silently dropping the setting.
 
-## Output Mode
+## SDR Video Output
 
-`ErikaOutputMode.preferHdr` is the cross-platform request for the best available
-HDR output. Erika resolves it once and uses that same output contract for both
-native player creation and the Flutter video surface: Android uses an FP16
-extended-linear scRGB `SurfaceView` with Hybrid Composition, while Apple uses
-Apple EDR.
-
-```dart
-final player = ErikaPlayer(
-  outputMode: ErikaOutputMode.preferHdr,
-  edrHeadroom: 4.0,
-);
-```
-
-Use `ErikaOutputMode.sdr` to force SDR output. The platform-specific
-`appleEdr` and `extendedLinear` modes remain for compatibility with custom
-hosts, but ordinary applications should use `auto`, `preferHdr`, or `sdr`.
-
-Android's high-headroom mode is FP16 **extended-linear scRGB**, not HDR10/PQ:
-
-`edrHeadroom` is a content-headroom ceiling. If it is omitted for an
-Android extended-linear request, Erika uses a 4x content ceiling while the
-`SurfaceView` receives desired headroom `0` (system auto). An explicit value is
-also applied as the per-`SurfaceView` desired headroom on API 35. The current
-display HDR/SDR ratio, when available, further bounds the effective wgpu target.
-
-The mode activates only when all of these hold: the display/surface is
-HDR-capable, the view is a Hybrid-Composition `SurfaceView`, wgpu selected
-Vulkan, the surface exposes `Rgba16Float`, and the configured native window
-reads back `ADATASPACE_SCRGB_LINEAR` (`406913024`, `0x18410000`). GLES,
-`TextureView`, missing FP16 support, and dataspace failures explicitly fall
-back to SDR. Android scRGB uses BT.709 primaries with `1.0 = 80 nit`; it does
-not use PQ or HDR10 metadata.
-
-Always query the negotiated state instead of trusting the request:
-
-```dart
-final status = await player.getOutputStatus();
-if (!status.extendedLinearActive) {
-  debugPrint(
-    'Erika output fallback: '
-    '${status.fallbackReason.label} (${status.fallbackReason.nativeValue})',
-  );
-}
-```
-
-`ErikaOutputStatus` contains 13 fields: `requestedMode`, `activeEncoding`,
-`surfaceFormat`, `nativeDataSpace`, `requestedHeadroom`, `activeHeadroom`,
-`activeHeadroomKnown`, `extendedLinearActive`, `fallbackReason`,
-`fallbackCount`, `dataSpaceFailures`, `headroomUpdates`, and
-`extendedLinearFrames`. Active Android scRGB is
-`androidExtendedLinearScRgb + sixteenBitFloat + nativeDataSpace 406913024`.
-On API 34+, `activeHeadroom` is the current display HDR/SDR ratio and
-`activeHeadroomKnown` is true when Android exposes a valid ratio. If the ratio
-is unavailable, the value is only a fallback and `activeHeadroomKnown` is
-false. `headroomUpdates` increments only when the known state or ratio really
-changes; duplicate listener notifications are ignored.
-
-`ErikaOutputFallbackReason` values are stable ABI codes:
-
-| Code | Dart value | Stable label |
-|------|------------|--------------|
-| 0 | `none` | `none` |
-| 1 | `displayHdrUnsupported` | `display_hdr_unsupported` |
-| 2 | `hybridCompositionRequired` | `hybrid_composition_required` |
-| 3 | `wgpuBackendNotVulkan` | `wgpu_backend_not_vulkan` |
-| 4 | `rgba16FloatSurfaceFormatUnavailable` | `rgba16float_surface_format_unavailable` |
-| 5 | `nativeWindowDataSpaceApiUnavailable` | `native_window_dataspace_api_unavailable` |
-| 6 | `scrgbDataSpaceVerificationFailed` | `scrgb_dataspace_verification_failed` |
-| 7 | `surfaceConfigureFailed` | `surface_configure_failed` |
-| 8 | `legacyAppleEdrUnsupported` | `legacy_apple_edr_unsupported` |
-
-`player.screenshot()` returns raw SDR RGBA8 for the current composited frame
-(video + subtitle + danmaku), even when the display is Apple EDR or Android
-extended-linear. Metal and Android/wgpu implement capture; the current Windows
-D3D11 Flutter path does not return screenshot bytes.
-
-Non-HDR emulator/device coverage verifies the explicit SDR fallback and its
-reason. Active extended-linear output is not yet claimed as device-validated;
-acceptance still requires an API 35 HDR device with `Rgba16Float +
-SCRGB_LINEAR`, live HDR/SDR-ratio updates, rotation/background recovery,
-multiple players, and SDR screenshot checks.
+`ErikaPlayer` always requests the SDR native output contract. HDR-encoded AV1 sources remain playable: Erika decodes their color metadata and tone-maps the frame into SDR. Android embeds video through the normal `erika_flutter/video_view` TextureView path. The Flutter API has no HDR output mode, headroom, or HDR capability switch.
 
 ## Upscaler
 

@@ -11,19 +11,19 @@ private let erikaWindowHostedVideoSurfaceId: Int64 = -1
 private let erikaDebugLabelsEnabled =
   ProcessInfo.processInfo.environment["ERIKA_DEBUG_LABELS"] == "1"
 
-private func erikaHdrWrite(_ message: String) {
-  fputs("ErikaHDR[tvOS]: \(message)\n", stderr)
+private func erikaVideoWrite(_ message: String) {
+  fputs("ErikaVideo[tvOS]: \(message)\n", stderr)
   fflush(stderr)
 }
 
-private func erikaHdrLog(_ enabled: Bool, _ message: String) {
+private func erikaVideoLog(_ enabled: Bool, _ message: String) {
   if enabled {
-    erikaHdrWrite(message)
+    erikaVideoWrite(message)
   }
 }
 
-private func erikaHdrEnvironmentEnabled() -> Bool {
-  guard let value = ProcessInfo.processInfo.environment["ERIKA_HDR_DEBUG"] else {
+private func erikaVideoEnvironmentEnabled() -> Bool {
+  guard let value = ProcessInfo.processInfo.environment["ERIKA_VIDEO_DEBUG"] else {
     return false
   }
   switch value.lowercased() {
@@ -34,90 +34,30 @@ private func erikaHdrEnvironmentEnabled() -> Bool {
   }
 }
 
-private func erikaOutputModeLabel(_ config: ErikaPresenterConfigC) -> String {
-  switch config.outputMode {
-  case 1:
-    return String(format: "AppleEdr(headroom=%.2f)", config.edrHeadroom)
-  case 2:
-    return String(format: "ExtendedLinear(headroom=%.2f)", config.edrHeadroom)
-  case 3:
-    return String(format: "Auto(headroom=%.2f)", config.edrHeadroom)
-  default:
-    return "Sdr"
-  }
-}
-
 private func erikaScreenSummary(_ screen: UIScreen?) -> String {
   guard let screen else {
     return "screen=nil"
   }
-  var parts = [
+  let parts = [
     "scale=\(screen.scale)",
     "nativeScale=\(screen.nativeScale)",
     "gamut=\(screen.traitCollection.displayGamut.rawValue)",
   ]
-  if #available(tvOS 16.0, *) {
-    parts.append("currentEDR=\(String(format: "%.3f", screen.currentEDRHeadroom))")
-    parts.append("potentialEDR=\(String(format: "%.3f", screen.potentialEDRHeadroom))")
-  }
   return parts.joined(separator: " ")
 }
 
-private func erikaLayerValue(_ layer: CAMetalLayer, selector name: String) -> String {
-  let selector = Selector(name)
-  guard layer.responds(to: selector) else {
-    return "unavailable"
-  }
-  return String(describing: layer.value(forKey: name) ?? "nil")
-}
-
-private func erikaConfigureLayerDynamicRange(_ layer: CAMetalLayer, config: ErikaPresenterConfigC) {
-  if config.outputMode == 1 || config.outputMode == 2 {
-    layer.contentsFormat = .RGBA16Float
-    if #available(tvOS 18.0, *) {
-      layer.toneMapMode = .ifSupported
-    }
-    if #available(tvOS 26.0, *) {
-      layer.preferredDynamicRange = .high
-      layer.contentsHeadroom = CGFloat(max(config.edrHeadroom, 1.0))
-    }
-    return
-  }
-
+private func erikaConfigureLayerSdr(_ layer: CAMetalLayer) {
   layer.contentsFormat = .RGBA8Uint
   if #available(tvOS 18.0, *) {
     layer.toneMapMode = .automatic
   }
-  // Auto is initialized in SDR, but the native renderer owns later changes.
-  // Do not pin preferredDynamicRange/contentsHeadroom to SDR here.
-  if config.outputMode != 3 {
-    if #available(tvOS 26.0, *) {
-      layer.preferredDynamicRange = .standard
-      layer.contentsHeadroom = 0.0
-    }
+  if #available(tvOS 26.0, *) {
+    layer.preferredDynamicRange = .standard
+    layer.contentsHeadroom = 0.0
   }
 }
 
 private func erikaLayerSummary(_ layer: CAMetalLayer) -> String {
-  let wantsEDR = "unavailable"
-  let toneMapMode: String
-  if #available(tvOS 18.0, *) {
-    toneMapMode = String(describing: layer.toneMapMode)
-  } else {
-    toneMapMode = "unavailable"
-  }
-  let preferredDynamicRange: String
-  if #available(tvOS 26.0, *) {
-    preferredDynamicRange = String(describing: layer.preferredDynamicRange)
-  } else {
-    preferredDynamicRange = "unavailable"
-  }
-  let contentsHeadroom: String
-  if #available(tvOS 26.0, *) {
-    contentsHeadroom = String(format: "%.3f", layer.contentsHeadroom)
-  } else {
-    contentsHeadroom = "unavailable"
-  }
   let colorSpace = layer.colorspace?.name.map { String(describing: $0) } ?? "nil"
   return [
     "pixelFormat=\(layer.pixelFormat.rawValue)",
@@ -125,11 +65,6 @@ private func erikaLayerSummary(_ layer: CAMetalLayer) -> String {
     "framebufferOnly=\(layer.framebufferOnly)",
     "opaque=\(layer.isOpaque)",
     "contentsFormat=\(layer.contentsFormat)",
-    "wantsEDR=\(wantsEDR)",
-    "toneMapMode=\(toneMapMode)",
-    "preferredDynamicRange=\(preferredDynamicRange)",
-    "contentsHeadroom=\(contentsHeadroom)",
-    "edrMetadata=\(erikaLayerValue(layer, selector: "EDRMetadata"))",
     "colorspace=\(colorSpace)",
   ].joined(separator: " ")
 }
@@ -182,14 +117,6 @@ private struct ErikaPresenterConfigC {
   var videoAlphaMode: Int32 = 0
 
   static let sdr = ErikaPresenterConfigC()
-
-  static func appleEdr(headroom: Float) -> ErikaPresenterConfigC {
-    ErikaPresenterConfigC(outputMode: 1, edrHeadroom: max(1.0, headroom))
-  }
-
-  static func auto(headroom: Float) -> ErikaPresenterConfigC {
-    ErikaPresenterConfigC(outputMode: 3, edrHeadroom: max(1.0, headroom))
-  }
 }
 
 private struct ErikaSubtitleStyleC {
@@ -554,8 +481,8 @@ private final class ErikaNativeLibrary {
     let loaded = try Self.openLibrary()
     libraryHandle = loaded.handle
     path = loaded.path
-    erikaHdrLog(
-      erikaHdrEnvironmentEnabled(),
+    erikaVideoLog(
+      erikaVideoEnvironmentEnabled(),
       "loaded native library from \(path)"
     )
 
@@ -702,8 +629,7 @@ private final class ErikaPlayerHost {
   private var displayLinkProxy: DisplayLinkProxy?
   private var startTimeSeconds: CFTimeInterval = CACurrentMediaTime()
   private var currentDanmakuConfig = ErikaDanmakuConfigC()
-  private let hdrDebug: Bool
-  private let presenterConfig: ErikaPresenterConfigC
+  private let videoDebug: Bool
   private var loggedRenderThread = false
   private var loggedFirstRenderedVideoFrame = false
   private var latestPresenterStats = ErikaPresenterStatsC()
@@ -718,22 +644,21 @@ private final class ErikaPlayerHost {
   private(set) var isPlaying = false
   var onNowPlayingChanged: ((ErikaPlayerHost) -> Void)?
 
-  init(id: Int64, library: ErikaNativeLibrary, config: ErikaPresenterConfigC, hdrDebug: Bool) throws {
+  init(id: Int64, library: ErikaNativeLibrary, config: ErikaPresenterConfigC, videoDebug: Bool) throws {
     self.id = id
     self.library = library
-    self.hdrDebug = hdrDebug
+    self.videoDebug = videoDebug
     renderQueue = DispatchQueue(
       label: "dev.aimesoft.erika.render.tvos.\(id)",
       qos: .userInteractive
     )
-    presenterConfig = config
     guard let handle = library.createPresenter(config: config) else {
       throw ErikaPluginError.presenterCreateFailed
     }
     self.handle = handle
-    erikaHdrLog(
-      hdrDebug,
-      "created presenter player=\(id) mode=\(erikaOutputModeLabel(config)) library=\(library.path) createWithOutputMode=\(library.createWithOutputMode != nil)"
+    erikaVideoLog(
+      videoDebug,
+      "created presenter player=\(id) mode=Sdr library=\(library.path) createWithOutputMode=\(library.createWithOutputMode != nil)"
     )
   }
 
@@ -1428,8 +1353,8 @@ private final class ErikaPlayerHost {
   func renderTick() {
     if !loggedRenderThread {
       loggedRenderThread = true
-      erikaHdrLog(
-        hdrDebug,
+      erikaVideoLog(
+        videoDebug,
         "render driver player=\(id) mainThread=\(Thread.isMainThread)"
       )
     }
@@ -1447,7 +1372,7 @@ private final class ErikaPlayerHost {
     if status != 0 {
       NSLog("ErikaFlutterPlugin: render_tick failed with status \(status)")
     }
-    if hdrDebug && stats.renderedVideoFrames > 0 {
+    if videoDebug && stats.renderedVideoFrames > 0 {
       let statsSnapshot = stats
       DispatchQueue.main.async { [weak self] in
         self?.logFirstRenderedVideoFrameIfNeeded(statsSnapshot)
@@ -1476,8 +1401,8 @@ private final class ErikaPlayerHost {
             notifyNowPlayingChanged()
           }
           if event.kind == 6 {
-            erikaHdrLog(
-              hdrDebug,
+            erikaVideoLog(
+              videoDebug,
               "video params player=\(id) width=\(event.video.width) height=\(event.video.height) primaries=\(event.video.primaries) transfer=\(event.video.transfer)"
             )
           }
@@ -1514,22 +1439,20 @@ private final class ErikaPlayerHost {
   }
 
   private func logFirstRenderedVideoFrameIfNeeded(_ stats: ErikaPresenterStatsC) {
-    guard hdrDebug, !loggedFirstRenderedVideoFrame else { return }
+    guard videoDebug, !loggedFirstRenderedVideoFrame else { return }
     loggedFirstRenderedVideoFrame = true
     let layer = attachedView.map { erikaLayerSummary($0.metalLayer) } ?? "layer=nil"
     let screen = erikaScreenSummary(attachedView?.window?.screen ?? UIScreen.main)
-    erikaHdrLog(
+    erikaVideoLog(
       true,
-      "first rendered frame player=\(id) mode=\(erikaOutputModeLabel(presenterConfig)) decoded=\(stats.decodedVideoFrames) rendered=\(stats.renderedVideoFrames) test=\(stats.renderedTestFrames) \(screen) \(layer)"
+      "first rendered frame player=\(id) mode=Sdr decoded=\(stats.decodedVideoFrames) rendered=\(stats.renderedVideoFrames) test=\(stats.renderedTestFrames) \(screen) \(layer)"
     )
   }
 
   private func attachOrResize(view: ErikaMetalSurfaceView, attach: Bool) throws {
     nativeCallLock.lock()
     defer { nativeCallLock.unlock() }
-    if attach || presenterConfig.outputMode != 3 {
-      erikaConfigureLayerDynamicRange(view.metalLayer, config: presenterConfig)
-    }
+    erikaConfigureLayerSdr(view.metalLayer)
     view.updateDrawableSize()
     let width = UInt32(max(1.0, view.metalLayer.drawableSize.width).rounded())
     let height = UInt32(max(1.0, view.metalLayer.drawableSize.height).rounded())
@@ -1537,14 +1460,14 @@ private final class ErikaPlayerHost {
     if attach {
       let rawLayer = UInt64(UInt(bitPattern: Unmanaged.passUnretained(view.metalLayer).toOpaque()))
       try check(library.attachMetalLayer(handle, rawLayer, width, height, scale), operation: "attach_metal_layer")
-      erikaHdrLog(
-        hdrDebug,
+      erikaVideoLog(
+        videoDebug,
         "attached layer player=\(id) view=\(view.platformViewId) physical=\(width)x\(height) scale=\(String(format: "%.3f", scale)) \(erikaScreenSummary(view.window?.screen ?? UIScreen.main)) \(erikaLayerSummary(view.metalLayer))"
       )
     } else {
       try check(library.resizeSurface(handle, width, height, scale), operation: "resize_surface")
-      erikaHdrLog(
-        hdrDebug,
+      erikaVideoLog(
+        videoDebug,
         "resized layer player=\(id) view=\(view.platformViewId) physical=\(width)x\(height) scale=\(String(format: "%.3f", scale)) \(erikaLayerSummary(view.metalLayer))"
       )
     }
@@ -2494,13 +2417,11 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     guard let library = ErikaNativeLibrary.shared else {
       throw ErikaPluginError.libraryNotFound(["main executable", "ERIKA_CAPI_DYLIB", "app bundle"])
     }
-    let args = arguments as? [String: Any]
-    let hdrDebug = boolValue(args?["hdrDebug"]) ??
-      boolEnvironmentFlag("ERIKA_HDR_DEBUG", environment: ProcessInfo.processInfo.environment)
-    let config = presenterConfigForNewPlayer(arguments: arguments, hdrDebug: hdrDebug)
+    let videoDebug = erikaVideoEnvironmentEnabled()
+    let config = presenterConfigForNewPlayer(arguments: arguments)
     let id = nextPlayerId
     nextPlayerId += 1
-    let host = try ErikaPlayerHost(id: id, library: library, config: config, hdrDebug: hdrDebug)
+    let host = try ErikaPlayerHost(id: id, library: library, config: config, videoDebug: videoDebug)
     host.onNowPlayingChanged = { [weak self] changedHost in
       guard self?.activePlayerId == changedHost.id else { return }
       self?.updateNowPlayingInfo(for: changedHost)
@@ -2655,78 +2576,12 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     commands.nextTrackCommand.isEnabled = enabled && capabilities?.nextEnabled == true
   }
 
-  private func presenterConfigForNewPlayer(arguments: Any?, hdrDebug: Bool) -> ErikaPresenterConfigC {
-    if let args = arguments as? [String: Any], let explicitMode = int32Value(args["outputMode"]) {
-      let headroom = floatValue(args["edrHeadroom"]) ?? 4.0
-      let config: ErikaPresenterConfigC
-      switch explicitMode {
-      case 1:
-        config = .appleEdr(headroom: headroom)
-      case 2:
-        config = ErikaPresenterConfigC(outputMode: 2, edrHeadroom: max(1.0, headroom))
-      case 3:
-        config = .auto(headroom: headroom)
-      default:
-        config = .sdr
-      }
-      erikaHdrLog(
-        hdrDebug,
-        "create explicit outputMode=\(explicitMode) requestedHeadroom=\(String(format: "%.3f", headroom)) selected=\(erikaOutputModeLabel(config))"
-      )
-      return config
-    }
-    let headroom = resolvedEdrHeadroom(hdrDebug: hdrDebug)
-    let config = ErikaPresenterConfigC.auto(headroom: headroom)
-    erikaHdrLog(
-      hdrDebug,
-      "create auto selected=\(erikaOutputModeLabel(config)) resolvedHeadroom=\(String(format: "%.3f", headroom))"
-    )
+  private func presenterConfigForNewPlayer(arguments: Any?) -> ErikaPresenterConfigC {
+    let alphaMode = (arguments as? [String: Any])
+      .flatMap { int32Value($0["videoAlphaMode"]) } ?? 0
+    var config = ErikaPresenterConfigC.sdr
+    config.videoAlphaMode = alphaMode
     return config
-  }
-
-  private func resolvedEdrHeadroom(hdrDebug: Bool) -> Float {
-    let environment = ProcessInfo.processInfo.environment
-    if boolEnvironmentFlag("ERIKA_DISABLE_EDR", environment: environment) {
-      erikaHdrLog(hdrDebug, "EDR disabled by ERIKA_DISABLE_EDR")
-      return 1.0
-    }
-    if let override = floatEnvironmentValue("ERIKA_EDR_HEADROOM", environment: environment), override > 1.0 {
-      erikaHdrLog(hdrDebug, "EDR headroom override ERIKA_EDR_HEADROOM=\(String(format: "%.3f", override))")
-      return override
-    }
-    let screenHeadroom = currentScreenEdrHeadroom(hdrDebug: hdrDebug)
-    if screenHeadroom > 1.0 { return screenHeadroom }
-    if boolEnvironmentFlag("ERIKA_ENABLE_EDR", environment: environment) {
-      erikaHdrLog(hdrDebug, "EDR forced by ERIKA_ENABLE_EDR")
-      return 4.0
-    }
-    return 1.0
-  }
-
-  private func currentScreenEdrHeadroom(hdrDebug: Bool) -> Float {
-    let screen = UIScreen.main
-    var samples: [String] = []
-    for key in ["potentialEDRHeadroom", "currentEDRHeadroom", "maximumPotentialExtendedDynamicRangeColorComponentValue"] {
-      let selector = Selector(key)
-      if screen.responds(to: selector), let number = screen.value(forKey: key) as? NSNumber {
-        let value = number.floatValue
-        samples.append("\(key)=\(String(format: "%.3f", value))")
-        if value.isFinite && value > 1.0 {
-          erikaHdrLog(
-            hdrDebug,
-            "screen headroom selected \(key)=\(String(format: "%.3f", value)) \(erikaScreenSummary(screen)) samples=[\(samples.joined(separator: ", "))]"
-          )
-          return value
-        }
-      } else {
-        samples.append("\(key)=unavailable")
-      }
-    }
-    erikaHdrLog(
-      hdrDebug,
-      "screen headroom fallback=1.000 \(erikaScreenSummary(screen)) samples=[\(samples.joined(separator: ", "))]"
-    )
-    return 1.0
   }
 
   private func startPollTimerIfNeeded() {
@@ -2877,23 +2732,6 @@ public final class ErikaFlutterPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     if let value = value as? NSNumber { return value.uint64Value }
     if let value = value as? String, let parsed = UInt64(value) { return parsed }
     throw ErikaPluginError.invalidArguments("\(name) is required.")
-  }
-
-  private func boolEnvironmentFlag(_ name: String, environment: [String: String]) -> Bool {
-    switch environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-    case "1", "true", "yes", "on": return true
-    default: return false
-    }
-  }
-
-  private func floatEnvironmentValue(_ name: String, environment: [String: String]) -> Float? {
-    guard let raw = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !raw.isEmpty,
-          let value = Float(raw),
-          value.isFinite else {
-      return nil
-    }
-    return value
   }
 
   private func flutterError(_ error: Error) -> FlutterError {

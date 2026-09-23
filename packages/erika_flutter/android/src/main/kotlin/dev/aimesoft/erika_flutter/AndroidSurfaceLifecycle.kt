@@ -76,18 +76,6 @@ internal class AndroidSurfaceRecoveryAttemptTracker {
     }
 }
 
-internal fun androidShouldRefreshHdrHeadroomAfterRecovery(
-    hostStillBound: Boolean,
-    surfaceAttached: Boolean,
-    disposed: Boolean,
-    disposeRequested: Boolean,
-    unbindRequested: Boolean,
-): Boolean = hostStillBound &&
-    surfaceAttached &&
-    !disposed &&
-    !disposeRequested &&
-    !unbindRequested
-
 internal fun androidShouldResumePendingViewBind(
     hostDestroyed: Boolean,
     targetDisposed: Boolean,
