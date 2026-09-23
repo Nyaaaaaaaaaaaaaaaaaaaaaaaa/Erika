@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-09-23
 
 - Made Flutter video playback SDR-only, including older HDR-encoded AV1 sources
   tone-mapped to SDR. Removed public HDR output modes, capability queries,

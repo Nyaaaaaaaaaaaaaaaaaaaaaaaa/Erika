@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 - 2026-09-23
+
+- Added a process-wide static-image operation ID allocator to the C ABI for
+  bounded AVIF decode and cancellation across Flutter isolates and HarmonyOS.
+- Updated the Flutter bridge to present static AVIF through `ErikaFileImage`
+  and to use SDR output for video playback.
+
 ## 0.2.0 - 2026-09-03
 
 - Added a decode-once static-image pipeline with bounded SDR textures and

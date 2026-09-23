@@ -1,6 +1,6 @@
 {
   "name": "erika_flutter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Erika SDR video and AVIF/HEIF/JPEG Flutter plugin for HarmonyOS NEXT",
   "main": "index.ets",
   "author": "Aimesoft",
