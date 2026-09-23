@@ -16,6 +16,14 @@ buildscript {
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
+// Pub may keep this plugin on C: while the consuming Flutter app is on another
+// drive. Kotlin's incremental cache cannot relativize those Windows paths.
+if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        incremental = false
+    }
+}
+
 android {
     namespace = "dev.aimesoft.erika_flutter"
     compileSdk = 36
