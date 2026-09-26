@@ -73,14 +73,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
-      - uses: android-actions/setup-android@v3
       - name: Install Android NDK and native build tools
         run: |
-          sdkmanager "ndk;$ANDROID_NDK_VERSION"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          sdkmanager_bin="$(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          test -n "$sdkmanager_bin"
+          "$sdkmanager_bin" "ndk;$ANDROID_NDK_VERSION"
           sudo apt-get update
           sudo apt-get install -y build-essential cmake make meson nasm ninja-build pkg-config libclang-dev python3-venv
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk_root/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$sdk_root/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.rust_target }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
