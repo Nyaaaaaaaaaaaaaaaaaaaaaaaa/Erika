@@ -52,13 +52,13 @@ cargo run -p xtask -- deps status
 - **Demuxer** — owns `AVFormatContext`, optionally with a Rust-backed custom
   `AVIOContext` from `MediaSource`. Supports stream selection, reference-counted
   packets, and timestamp-based seek.
-- **Decoder** — AV1 software plus VideoToolbox, D3D11VA/DXVA2, MediaCodec, and
-  OpenHarmony AVCodec hardware backends. Software AV1 on every target selects
-  source-built `libdav1d`. OpenHarmony queries only hardware-category
-  `video/av1` capability, validates the coded size, and creates the returned
-  codec by name; it never selects a system software AVCodec. Hardware frames
-  preserve color metadata for the renderer's platform-specific import or upload
-  path.
+- **Decoder** — VideoToolbox, AV1 D3D11VA/DXVA2, MediaCodec, and OpenHarmony
+  AVCodec backends, with compiled software decoders as fallback. Software AV1
+  selects source-built `libdav1d`. OpenHarmony keeps AV1 hardware-only with a
+  dav1d fallback; other mapped codecs use `CreateByMime` so the system can
+  select an available decoder. Frames preserve color metadata for the
+  renderer's platform-specific import or upload path. See the
+  [media scope](../README.md) for the compiled codec set on each platform.
 - **AudioResampler** — wraps `libswresample`, converts to interleaved f32 PCM
   (default 48 kHz stereo).
 
@@ -67,11 +67,12 @@ cargo run -p xtask -- deps status
 `PlaybackSession` opens media, selects tracks, configures decode backend, and
 produces video frames and PCM audio blocks.
 
-After probe and before decoder creation, the session requires an AV1 visual
-track. Dynamic AV1 is accepted in MP4/MOV, Matroska/WebM, IVF, and raw AV1;
-AVIF is accepted as one static primary image. Audio is ancillary only.
-Subtitles and danmaku are removed. Non-AV1 visuals and audio-only media fail
-through the existing error channel with the supported scope in the message.
+After probe, sessions using MediaCodec, VideoToolbox, or AVCodec attempt the
+selected visual codec through the configured platform backend. Device support
+is established when opening, decoding, and rendering the stream. Other backend
+policies retain the AV1 video boundary and existing AVIF/HEIF/JPEG static-image
+support. Unsupported inputs fail through the existing error channel. Audio is
+ancillary only; audio-only media, subtitles, and danmaku remain unsupported.
 
 Decoder availability is a session invariant: when a video track is selected,
 the play, seek, and video-frame-pump entry points require an active video

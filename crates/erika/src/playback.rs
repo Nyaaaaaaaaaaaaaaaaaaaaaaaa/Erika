@@ -29,17 +29,11 @@ pub enum PlaybackError {
     Ffmpeg(#[from] ffmpeg::FfmpegError),
     #[error("source error: {0}")]
     Source(#[from] source::SourceError),
-    #[error(
-        "no supported visual track found; AV1 video and static AVIF/HEIF/JPEG images are supported"
-    )]
+    #[error("no video or supported static-image track found")]
     NoVideoTrack,
-    #[error(
-        "unsupported visual codec {codec}; AV1 video and static AVIF/HEIF/JPEG images are supported"
-    )]
+    #[error("unsupported visual codec for the selected decoder: {codec}")]
     UnsupportedVisualCodec { codec: String },
-    #[error(
-        "unable to inspect this media ({reason}); AV1 video and static AVIF/HEIF/JPEG images are supported"
-    )]
+    #[error("unable to inspect this media ({reason})")]
     UnsupportedMediaInput { reason: String },
     #[error("video decoder unavailable: {reason}")]
     VideoDecoderUnavailable { reason: String },
@@ -864,14 +858,18 @@ impl PlaybackSession {
         let mut probe = demuxer.probe().clone();
         // The specialized runtime intentionally exposes no subtitle tracks or
         // embedded font attachments. Demuxing may still report such streams in
-        // an AV1 container, but they are never selected or decoded.
+        // a video container, but they are never selected or decoded.
         probe
             .tracks
             .retain(|track| track.kind != TrackKind::Subtitle);
         probe.subtitles.clear();
         probe.subtitle_fonts = Arc::from([]);
         let subtitle_fonts: Arc<[SubtitleFontAttachment]> = Arc::from([]);
-        let selected_video_track = Some(supported_visual_track(&probe.tracks, probe.duration)?);
+        let selected_video_track = Some(supported_visual_track(
+            &probe.tracks,
+            probe.duration,
+            config.video_decode,
+        )?);
         let codec_parameters = probe
             .tracks
             .iter()
@@ -914,10 +912,7 @@ impl PlaybackSession {
                         decoder
                     }
                     Err(error)
-                        if should_fallback_video_decoder_open_error(
-                            decoder_config.backend,
-                            codec.as_deref(),
-                        ) =>
+                        if should_fallback_video_decoder_open_error(decoder_config.backend) =>
                     {
                         let surface_error = error.to_string();
                         if decoder_config.backend == DecoderBackend::MediaCodec
@@ -2664,8 +2659,7 @@ impl PlaybackSession {
                 }
             }
             Err(error)
-                if self.active_video_decoder_backend() == Some(DecoderBackend::VideoToolbox)
-                    && self.active_video_codec_is_av1() =>
+                if self.active_video_decoder_backend() == Some(DecoderBackend::VideoToolbox) =>
             {
                 let reason = error.to_string();
                 self.fallback_video_decoder_to_software(
@@ -3038,16 +3032,12 @@ impl PlaybackSession {
     ) -> Result<bool> {
         let is_mediacodec = failure.decode_backend == DecoderBackend::MediaCodec;
         let is_avcodec = failure.decode_backend == DecoderBackend::AvCodec;
-        let is_videotoolbox_av1 = failure.decode_backend == DecoderBackend::VideoToolbox
-            && failure
-                .codec
-                .as_deref()
-                .is_some_and(|codec| codec.eq_ignore_ascii_case("av1"));
-        if !is_mediacodec && !is_avcodec && !is_videotoolbox_av1 {
+        let is_videotoolbox = failure.decode_backend == DecoderBackend::VideoToolbox;
+        if !is_mediacodec && !is_avcodec && !is_videotoolbox {
             return Ok(false);
         }
         let active_backend = self.active_video_decoder_backend();
-        let expected_backend = if is_videotoolbox_av1 {
+        let expected_backend = if is_videotoolbox {
             DecoderBackend::VideoToolbox
         } else if is_avcodec {
             DecoderBackend::AvCodec
@@ -3068,7 +3058,7 @@ impl PlaybackSession {
             );
             return Ok(false);
         }
-        if is_videotoolbox_av1 || is_avcodec {
+        if is_videotoolbox || is_avcodec {
             let fallback_stage = if is_avcodec {
                 format!("{stage}_avcodec_to_software")
             } else {
@@ -5868,18 +5858,31 @@ fn sanitize_playback_rate(rate: f64) -> f64 {
     }
 }
 
-fn supported_visual_track(tracks: &[TrackInfo], duration: Option<Duration>) -> Result<i32> {
+fn supported_visual_track(
+    tracks: &[TrackInfo],
+    duration: Option<Duration>,
+    video_decode: VideoDecodePreference,
+) -> Result<i32> {
     let mut selected = None;
     // Still-image demuxers commonly expose no duration. A bounded duration and
     // no audio track covers HEIF/JPEG containers that report a nominal tick,
-    // while keeping general HEVC/MJPEG video outside Erika's AV1-only policy.
+    // preserving the static-image policy on other decoder paths.
     let static_image_candidate = !tracks.iter().any(|track| track.kind == TrackKind::Audio)
         && duration.is_none_or(|duration| duration <= Duration::from_secs(1));
+    // Platform decoders check codec and device support at open. Do not reject
+    // their formats through an AV1-only whitelist before reaching the backend.
+    let use_platform_decoder = matches!(
+        video_decode,
+        VideoDecodePreference::MediaCodec
+            | VideoDecodePreference::MediaCodecByteBuffer
+            | VideoDecodePreference::VideoToolbox
+            | VideoDecodePreference::AvCodec
+    );
     for track in tracks.iter().filter(|track| track.kind == TrackKind::Video) {
         let codec = track.codec.as_deref().unwrap_or("unknown");
         let supported_static_codec = static_image_candidate
             && (codec.eq_ignore_ascii_case("hevc") || codec.eq_ignore_ascii_case("mjpeg"));
-        if !codec.eq_ignore_ascii_case("av1") && !supported_static_codec {
+        if !use_platform_decoder && !codec.eq_ignore_ascii_case("av1") && !supported_static_codec {
             return Err(PlaybackError::UnsupportedVisualCodec {
                 codec: codec.to_string(),
             });
@@ -5889,12 +5892,14 @@ fn supported_visual_track(tracks: &[TrackInfo], duration: Option<Duration>) -> R
     selected.ok_or(PlaybackError::NoVideoTrack)
 }
 
-fn should_fallback_video_decoder_open_error(backend: DecoderBackend, codec: Option<&str>) -> bool {
+fn should_fallback_video_decoder_open_error(backend: DecoderBackend) -> bool {
     matches!(
         backend,
-        DecoderBackend::D3d11va | DecoderBackend::MediaCodec | DecoderBackend::AvCodec
-    ) || (backend == DecoderBackend::VideoToolbox
-        && codec.is_some_and(|codec| codec.eq_ignore_ascii_case("av1")))
+        DecoderBackend::D3d11va
+            | DecoderBackend::MediaCodec
+            | DecoderBackend::AvCodec
+            | DecoderBackend::VideoToolbox
+    )
 }
 
 fn video_decoder_open_stage(config: DecoderConfig) -> &'static str {
@@ -5994,20 +5999,25 @@ mod tests {
     }
 
     #[test]
-    fn visual_policy_accepts_only_av1_tracks() {
+    fn visual_policy_accepts_av1_tracks() {
         let tracks = [
             track(0, TrackKind::Video, Some("av1")),
             track(1, TrackKind::Audio, Some("flac")),
             track(2, TrackKind::Subtitle, Some("subrip")),
         ];
         assert_eq!(
-            supported_visual_track(&tracks, Some(Duration::from_secs(8))).unwrap(),
+            supported_visual_track(
+                &tracks,
+                Some(Duration::from_secs(8)),
+                VideoDecodePreference::Software,
+            )
+            .unwrap(),
             0
         );
     }
 
     #[test]
-    fn visual_policy_rejects_non_av1_and_unknown_video_tracks() {
+    fn other_decoder_visual_policy_rejects_non_av1_and_unknown_video_tracks() {
         for codec in [
             Some("h264"),
             Some("hevc"),
@@ -6020,33 +6030,79 @@ mod tests {
             let error = supported_visual_track(
                 &[track(0, TrackKind::Video, codec)],
                 Some(Duration::from_secs(8)),
+                VideoDecodePreference::Software,
             )
             .expect_err("non-AV1 visual tracks must be rejected");
             assert!(matches!(
                 error,
                 PlaybackError::UnsupportedVisualCodec { .. }
             ));
-            assert!(
-                error
-                    .to_string()
-                    .contains("AV1 video and static AVIF/HEIF/JPEG images")
+        }
+    }
+
+    #[test]
+    fn platform_visual_policy_defers_video_support_to_device_open() {
+        for preference in [
+            VideoDecodePreference::MediaCodec,
+            VideoDecodePreference::MediaCodecByteBuffer,
+            VideoDecodePreference::VideoToolbox,
+            VideoDecodePreference::AvCodec,
+        ] {
+            for codec in [
+                Some("av1"),
+                Some("h264"),
+                Some("h263"),
+                Some("hevc"),
+                Some("mpeg1video"),
+                Some("mpeg2video"),
+                Some("mpeg4"),
+                Some("vp8"),
+                Some("vp9"),
+                Some("prores"),
+                None,
+            ] {
+                let tracks = [
+                    track(3, TrackKind::Video, codec),
+                    track(4, TrackKind::Audio, Some("aac")),
+                ];
+                assert_eq!(
+                    supported_visual_track(&tracks, Some(Duration::from_secs(8)), preference)
+                        .unwrap(),
+                    3,
+                    "{preference:?}: {codec:?} must reach decoder selection",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn software_visual_policy_preserves_static_heif_and_jpeg() {
+        for codec in ["hevc", "mjpeg"] {
+            let tracks = [track(0, TrackKind::Video, Some(codec))];
+            assert_eq!(
+                supported_visual_track(&tracks, None, VideoDecodePreference::Software).unwrap(),
+                0
             );
         }
     }
 
     #[test]
     fn visual_policy_rejects_audio_only_media() {
-        let error = supported_visual_track(
-            &[track(0, TrackKind::Audio, Some("flac"))],
-            Some(Duration::from_secs(8)),
-        )
-        .expect_err("audio-only media must be rejected");
-        assert!(matches!(error, PlaybackError::NoVideoTrack));
-        assert!(
-            error
-                .to_string()
-                .contains("AV1 video and static AVIF/HEIF/JPEG images")
-        );
+        for preference in [
+            VideoDecodePreference::Software,
+            VideoDecodePreference::MediaCodec,
+            VideoDecodePreference::MediaCodecByteBuffer,
+            VideoDecodePreference::VideoToolbox,
+            VideoDecodePreference::AvCodec,
+        ] {
+            let error = supported_visual_track(
+                &[track(0, TrackKind::Audio, Some("flac"))],
+                Some(Duration::from_secs(8)),
+                preference,
+            )
+            .expect_err("audio-only media must be rejected");
+            assert!(matches!(error, PlaybackError::NoVideoTrack));
+        }
     }
 
     fn playback_fixture_path() -> PathBuf {
@@ -6141,7 +6197,7 @@ mod tests {
     }
 
     #[test]
-    fn uninspectable_media_error_still_states_the_supported_visual_scope() {
+    fn uninspectable_media_error_retains_the_probe_failure() {
         let path = std::env::temp_dir().join(format!(
             "erika-unsupported-media-{}.bin",
             std::process::id()
@@ -6161,16 +6217,14 @@ mod tests {
             Ok(_) => panic!("uninspectable media must fail"),
             Err(error) => error,
         };
-        assert!(matches!(error, PlaybackError::UnsupportedMediaInput { .. }));
-        assert!(
-            error
-                .to_string()
-                .contains("AV1 video and static AVIF/HEIF/JPEG images")
-        );
+        assert!(matches!(
+            error,
+            PlaybackError::UnsupportedMediaInput { reason } if !reason.is_empty()
+        ));
     }
 
     #[test]
-    fn unsupported_media_samples_are_rejected_when_env_is_set() {
+    fn software_unsupported_media_samples_are_rejected_when_env_is_set() {
         let Some(directory) =
             std::env::var_os("ERIKA_UNSUPPORTED_MEDIA_SAMPLES_DIR").map(PathBuf::from)
         else {
@@ -6192,7 +6246,10 @@ mod tests {
                     http_headers: Vec::new(),
                     http_read_ahead_bytes: None,
                 },
-                PlaybackSessionConfig::default(),
+                PlaybackSessionConfig {
+                    video_decode: VideoDecodePreference::Software,
+                    ..PlaybackSessionConfig::default()
+                },
             );
             let error = match result {
                 Ok(_) => panic!("unsupported media must fail: {}", path.display()),
@@ -6204,13 +6261,6 @@ mod tests {
                     | PlaybackError::UnsupportedVisualCodec { .. }
                     | PlaybackError::UnsupportedMediaInput { .. }
             ));
-            assert!(
-                error
-                    .to_string()
-                    .contains("AV1 video and static AVIF/HEIF/JPEG images"),
-                "unexpected error for {}: {error}",
-                path.display()
-            );
         }
     }
 
@@ -6592,38 +6642,21 @@ mod tests {
 
     #[test]
     fn decoder_open_fallback_is_enabled_for_platform_hardware_backends() {
-        assert!(should_fallback_video_decoder_open_error(
+        for backend in [
             DecoderBackend::D3d11va,
-            None
-        ));
-        assert!(should_fallback_video_decoder_open_error(
             DecoderBackend::MediaCodec,
-            None
-        ));
-        assert!(should_fallback_video_decoder_open_error(
             DecoderBackend::AvCodec,
-            Some("av1")
-        ));
+            DecoderBackend::VideoToolbox,
+        ] {
+            assert!(should_fallback_video_decoder_open_error(backend));
+        }
         assert_eq!(
             video_decoder_open_stage(DecoderConfig::avcodec()),
             "open_avcodec",
-            "HarmonyOS uses one direct AVCodec-to-dav1d open fallback"
+            "HarmonyOS uses one direct AVCodec-to-software open fallback"
         );
         assert!(!should_fallback_video_decoder_open_error(
-            DecoderBackend::VideoToolbox,
-            Some("h264")
-        ));
-        assert!(should_fallback_video_decoder_open_error(
-            DecoderBackend::VideoToolbox,
-            Some("av1")
-        ));
-        assert!(should_fallback_video_decoder_open_error(
-            DecoderBackend::VideoToolbox,
-            Some("AV1")
-        ));
-        assert!(!should_fallback_video_decoder_open_error(
-            DecoderBackend::Software,
-            Some("av1")
+            DecoderBackend::Software
         ));
     }
 

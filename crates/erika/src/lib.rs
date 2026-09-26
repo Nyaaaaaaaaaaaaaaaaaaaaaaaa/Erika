@@ -12,6 +12,9 @@ pub mod image;
 pub mod ohos;
 #[cfg(any(target_env = "ohos", test))]
 mod ohos_av1;
+#[cfg(all(test, not(target_env = "ohos")))]
+#[path = "ohos/video_codec.rs"]
+mod ohos_video_codec;
 pub mod overlay;
 pub mod playback;
 pub mod presenter;

@@ -70,7 +70,7 @@ Android 最低 API 为 **26**;只在需要更高版本时用 `ANDROID_API_LEVEL`
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# 构建 AV1/AVIF 原生依赖(zlib + FFmpeg,以及使用目标上的 dav1d)
+# 构建目标平台的原生依赖(zlib + FFmpeg,以及使用目标上的 dav1d)
 cargo run -p xtask -- deps build --profile lgpl
 ```
 

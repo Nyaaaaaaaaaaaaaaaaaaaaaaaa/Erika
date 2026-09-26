@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::ohos_av1::{
-    HardwareAv1CapabilityRejection, av1_codec_config_obus, select_hardware_av1_codec_name,
-};
+use crate::ohos_av1::{HardwareAv1CapabilityRejection, select_hardware_av1_codec_name};
+
+pub use super::video_codec::OhosVideoCodec;
+use super::video_codec::{length_prefixed_packet_to_annex_b, normalize_codec_config};
 
 const AV_ERR_OK: i32 = 0;
 const AV_PIXEL_FORMAT_NV12: i32 = 2;
@@ -217,31 +218,6 @@ unsafe extern "C" {
     static OH_MD_KEY_VIDEO_SLICE_HEIGHT: *const c_char;
     static OH_MD_KEY_VIDEO_PIC_WIDTH: *const c_char;
     static OH_MD_KEY_VIDEO_PIC_HEIGHT: *const c_char;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OhosVideoCodec {
-    Av1,
-    Avc,
-    Hevc,
-}
-
-impl OhosVideoCodec {
-    fn mime(self) -> &'static [u8] {
-        match self {
-            Self::Av1 => b"video/av1\0",
-            Self::Avc => b"video/avc\0",
-            Self::Hevc => b"video/hevc\0",
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Av1 => "av1",
-            Self::Avc => "h264",
-            Self::Hevc => "hevc",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1206,28 +1182,6 @@ impl Drop for OhosVideoDecoder {
     }
 }
 
-fn normalize_codec_config(
-    codec: OhosVideoCodec,
-    codec_config: &[u8],
-) -> Result<(Vec<u8>, Option<usize>, Vec<u8>), String> {
-    if codec_config.is_empty() {
-        return Ok((Vec::new(), None, Vec::new()));
-    }
-    if codec == OhosVideoCodec::Av1 {
-        let config_obus = av1_codec_config_obus(codec_config).map_err(|error| error.to_string())?;
-        return Ok((config_obus.to_vec(), None, Vec::new()));
-    }
-    if is_annex_b(codec_config) {
-        return Ok((codec_config.to_vec(), None, codec_config.to_vec()));
-    }
-    let (parameter_sets, nal_length_size) = match codec {
-        OhosVideoCodec::Av1 => unreachable!("AV1 codec config is normalized above"),
-        OhosVideoCodec::Avc => avcc_to_annex_b(codec_config),
-        OhosVideoCodec::Hevc => hvcc_to_annex_b(codec_config),
-    }?;
-    Ok((codec_config.to_vec(), nal_length_size, parameter_sets))
-}
-
 fn hardware_av1_codec_name(
     mime: &'static [u8],
     width: u32,
@@ -1316,123 +1270,6 @@ fn avcodec_initialization_failure_stage(reason: &str) -> &'static str {
     } else {
         "initialize"
     }
-}
-
-fn avcc_to_annex_b(config: &[u8]) -> Result<(Vec<u8>, Option<usize>), String> {
-    if config.len() < 7 || config[0] != 1 {
-        return Err("invalid AVCDecoderConfigurationRecord".to_string());
-    }
-    let nal_length_size = (config[4] & 0x03) as usize + 1;
-    let mut cursor = 6;
-    let mut output = Vec::with_capacity(config.len() + 16);
-    let sequence_parameter_sets = (config[5] & 0x1f) as usize;
-    for _ in 0..sequence_parameter_sets {
-        append_config_nal(config, &mut cursor, &mut output)?;
-    }
-    let picture_parameter_sets = *config
-        .get(cursor)
-        .ok_or_else(|| "AVC configuration is missing PPS count".to_string())?
-        as usize;
-    cursor += 1;
-    for _ in 0..picture_parameter_sets {
-        append_config_nal(config, &mut cursor, &mut output)?;
-    }
-    if output.is_empty() {
-        return Err("AVC configuration contains no SPS/PPS data".to_string());
-    }
-    Ok((output, Some(nal_length_size)))
-}
-
-fn hvcc_to_annex_b(config: &[u8]) -> Result<(Vec<u8>, Option<usize>), String> {
-    if config.len() < 23 || config[0] != 1 {
-        return Err("invalid HEVCDecoderConfigurationRecord".to_string());
-    }
-    let nal_length_size = (config[21] & 0x03) as usize + 1;
-    let array_count = config[22] as usize;
-    let mut cursor = 23usize;
-    let mut output = Vec::with_capacity(config.len() + array_count * 4);
-    for _ in 0..array_count {
-        cursor = cursor
-            .checked_add(1)
-            .filter(|cursor| *cursor + 2 <= config.len())
-            .ok_or_else(|| "truncated HEVC configuration array".to_string())?;
-        let nal_count = u16::from_be_bytes([config[cursor], config[cursor + 1]]) as usize;
-        cursor += 2;
-        for _ in 0..nal_count {
-            append_config_nal(config, &mut cursor, &mut output)?;
-        }
-    }
-    if output.is_empty() {
-        return Err("HEVC configuration contains no VPS/SPS/PPS data".to_string());
-    }
-    Ok((output, Some(nal_length_size)))
-}
-
-fn append_config_nal(
-    config: &[u8],
-    cursor: &mut usize,
-    output: &mut Vec<u8>,
-) -> Result<(), String> {
-    if *cursor + 2 > config.len() {
-        return Err("truncated codec configuration NAL length".to_string());
-    }
-    let nal_size = u16::from_be_bytes([config[*cursor], config[*cursor + 1]]) as usize;
-    *cursor += 2;
-    let end = cursor
-        .checked_add(nal_size)
-        .filter(|end| *end <= config.len())
-        .ok_or_else(|| "truncated codec configuration NAL data".to_string())?;
-    output.extend_from_slice(&[0, 0, 0, 1]);
-    output.extend_from_slice(&config[*cursor..end]);
-    *cursor = end;
-    Ok(())
-}
-
-fn length_prefixed_packet_to_annex_b(
-    packet: &[u8],
-    nal_length_size: usize,
-) -> Result<Vec<u8>, String> {
-    if !(1..=4).contains(&nal_length_size) {
-        return Err(format!("invalid NAL length size {nal_length_size}"));
-    }
-    let mut cursor = 0usize;
-    let mut output = Vec::with_capacity(packet.len().saturating_add(16));
-    while cursor < packet.len() {
-        if cursor + nal_length_size > packet.len() {
-            return Err("truncated length-prefixed video packet".to_string());
-        }
-        let mut nal_size = 0usize;
-        for byte in &packet[cursor..cursor + nal_length_size] {
-            nal_size = nal_size
-                .checked_shl(8)
-                .and_then(|value| value.checked_add(*byte as usize))
-                .ok_or_else(|| "video packet NAL size overflowed".to_string())?;
-        }
-        cursor += nal_length_size;
-        if nal_size == 0 {
-            continue;
-        }
-        let end = cursor
-            .checked_add(nal_size)
-            .filter(|end| *end <= packet.len())
-            .ok_or_else(|| {
-                format!(
-                    "video packet NAL size {nal_size} exceeds remaining {} bytes",
-                    packet.len().saturating_sub(cursor)
-                )
-            })?;
-        output.extend_from_slice(&[0, 0, 0, 1]);
-        output.extend_from_slice(&packet[cursor..end]);
-        cursor = end;
-    }
-    if output.is_empty() && !packet.is_empty() {
-        return Err("length-prefixed video packet contains no NAL data".to_string());
-    }
-    Ok(output)
-}
-
-fn is_annex_b(data: &[u8]) -> bool {
-    data.starts_with(&[0, 0, 1]) || data.starts_with(&[0, 0, 0, 1])
 }
 
 unsafe fn nv12_output_view<'a>(

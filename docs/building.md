@@ -80,7 +80,7 @@ Erika's Android minimum is API **26**. Override it with
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# Build the AV1/AVIF native set (zlib + FFmpeg, plus dav1d where used)
+# Build the platform's native set (zlib + FFmpeg, plus dav1d where used)
 cargo run -p xtask -- deps build --profile lgpl
 ```
 
@@ -218,12 +218,13 @@ The native build is split into profiles so the license boundary is explicit:
 
 - **`lgpl`** (default) — FFmpeg configured `--disable-everything`,
   `--disable-gpl --enable-version3`, static, no network, and file protocol only.
-  Its visual decoder/parser allowlist contains AV1 only; demuxers cover
-  MP4/MOV/AVIF, Matroska/WebM, IVF, raw AV1, and ASS/SRT/WebVTT. Audio and
-  audio decoders are ancillary to AV1 playback. AV1 hardware is enabled only
-  through VideoToolbox (Apple), D3D11VA/DXVA2 (Windows), and MediaCodec
-  (Android); dav1d is the software fallback on every target, including Windows
-  and OpenHarmony.
+  Visual decoders, parsers, and demuxers are enabled per platform; see the
+  [media scope](../README.md) for the codec lists. Android enables MediaCodec,
+  Apple enables VideoToolbox and its required native decoder components, and
+  HarmonyOS maps codecs directly to AVCodec. Windows retains AV1
+  D3D11VA/DXVA2. Existing static AVIF/HEIF/JPEG decoders remain available.
+  Audio decoders are ancillary to video playback; subtitles are disabled.
+  Software AV1 uses dav1d on every target.
 - **`gpl-full`** — the same set with `--enable-gpl`. Use only if you accept GPL
   terms for the resulting binary.
 
@@ -282,17 +283,16 @@ cargo test --workspace               # unit + integration tests
 - Android: per-ABI `liberika_capi.so` plus the matching NDK
   `libc++_shared.so`; `liberika_capi.a` is also available for native embedders.
 
-Android FFmpeg keeps only the AV1 MediaCodec visual decoder enabled. The
-intended hardware path asks MediaCodec for
-software-readable YUV frames and reuses the shared wgpu upload/composition
-pipeline, preserving screenshots and the diagnostic HUD. This is hardware
-decode with a CPU upload, not a zero-copy Surface path; metrics must report it
-accordingly. If AV1 MediaCodec cannot open or fails while decoding, the software
-path explicitly selects FFmpeg's `libdav1d` decoder. `xtask` builds dav1d 1.5.1
-from source for every target, with both 8-bit and high-bit-depth support; the
-32-bit Android x86 slice disables assembly to preserve PIC safety. FFmpeg's
-separate native AV1 decoder is not compiled, so software fallback has exactly
-one implementation.
+Android FFmpeg enables MediaCodec for AV1, H.264, HEVC, MPEG-2, MPEG-4, VP8,
+and VP9, together with the required parsers and demuxers. Playback first uses
+Surface output, falls back to MediaCodec ByteBuffer output when needed, then
+tries a compiled software decoder. Surface output can use
+AHardwareBuffer/Vulkan import; ByteBuffer and software output use CPU upload.
+Unsupported device profiles or missing fallback decoders produce an error.
+Software AV1 explicitly selects `libdav1d`. `xtask` builds dav1d 1.5.1 from
+source for every target, with 8-bit and high-bit-depth support; the 32-bit
+Android x86 slice disables assembly to preserve PIC safety. The separate
+native AV1 decoder is not compiled for Android.
 
 ### Verify Android output negotiation
 

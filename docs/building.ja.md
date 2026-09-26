@@ -66,7 +66,7 @@ Android の最小 API は 26 です。
 cargo run -p xtask -- deps plan
 cargo run -p xtask -- deps status
 
-# AV1/AVIF native set（zlib + FFmpeg、利用 target では dav1d も）
+# 対象プラットフォームの native set（zlib + FFmpeg、利用 target では dav1d も）
 cargo run -p xtask -- deps build --profile lgpl
 ```
 

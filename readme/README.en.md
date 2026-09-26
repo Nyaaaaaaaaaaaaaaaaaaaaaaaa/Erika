@@ -16,18 +16,25 @@ The host application provides a rendering surface and sends playback commands â€
 ## Media scope of this fork
 
 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` keeps Erika's existing crates, C ABI,
-Flutter/ArkTS package names, and cross-platform rendering interfaces, while
-accepting only these visual formats:
+Flutter/ArkTS package names, and cross-platform rendering interfaces, with this media scope:
 
-- Dynamic AV1 video in MP4/MOV, Matroska/MKV, WebM, IVF, or raw AV1/OBU.
-- A single static primary image in AVIF. Animated AVIF and image sequences are
-  not compatibility commitments; the decoded image remains on the render surface at EOF.
-- Audio is ancillary to AV1 playback. Subtitles and danmaku are removed from
-  this specialized runtime. Audio-only media and every other visual codec are rejected.
+- AV1 video remains supported across platforms in MP4/MOV, Matroska/MKV, WebM, IVF, or raw AV1/OBU.
+- Android enables MediaCodec backends for AV1, H.264, HEVC, MPEG-2, MPEG-4, VP8, and VP9.
+- iOS, macOS, and tvOS enable FFmpeg 8.1.2's VideoToolbox backends for AV1, H.263, H.264, HEVC, MPEG-1, MPEG-2, MPEG-4, ProRes, and VP9.
+- HarmonyOS maps AV1, H.263, H.264, HEVC, MPEG-2, MPEG-4, VP8, and VP9 to AVCodec.
+- These platforms enable the corresponding bitstream parsers and common container demuxers. Dynamic video on Windows remains limited to AV1.
+- Static AVIF, HEIF/HEIC, and JPEG images remain supported; the decoded image stays on the render surface. Animation and image sequences are not compatibility commitments.
+- Audio is ancillary to video playback; audio-only input is unsupported. Subtitles and danmaku are removed from this specialized runtime.
+
+Decoder initialization, decoding, and rendering on the device determine support for each codec
+profile, frame size, and output format. If the system path fails, playback tries a compiled software
+decoder; software AV1 uses dav1d. Playback reports an error when no usable path remains.
+This does not promise arbitrary formats, hardware decoding, or zero-copy output for every profile.
+Unlisted inputs such as PNG and WebP remain unsupported.
 
 ## Features
 
-- **AV1 hardware decoding** -- VideoToolbox (macOS/iOS/tvOS), D3D11VA/DXVA2 (Windows), MediaCodec (Android), and hardware-category AVCodec (HarmonyOS), with explicit dav1d fallback
+- **Platform decoding** -- VideoToolbox (macOS/iOS/tvOS), AV1 D3D11VA/DXVA2 (Windows), MediaCodec (Android), and AVCodec (HarmonyOS), using device capabilities within the scope above with software fallback
 - **Zero-copy rendering** -- CVPixelBuffer to MTLTexture (Apple), D3D11VA texture interop (Windows), MediaCodec Surface to AHardwareBuffer/Vulkan (Android), and AVCodec Surface to NativeBuffer/Vulkan (HarmonyOS), with explicit CPU upload for buffer output and software frames
 - **HDR/EDR output** -- Apple EDR, Windows HDR10, and Android FP16 extended-linear scRGB negotiation with explicit SDR fallback
 - **Native Metal renderer** -- YCbCr sampling, color space conversion, and tone mapping in a single render pass (macOS/iOS/tvOS)
@@ -94,7 +101,7 @@ prebuilt mode fails explicitly and never downloads upstream full-codec binaries.
 
 This fork has not published an OHPM package. Integrate the source under
 `packages/erika_ohos`; the upstream package with the same name does not carry
-this fork's AV1/AVIF-only contract.
+this fork's platform-specific media scope described above.
 
 See the [OpenHarmony package guide](../packages/erika_ohos/README.md) for the
 `ErikaPlayer` API and `XComponent` surface setup.
@@ -114,13 +121,13 @@ Header: [`crates/erika_capi/include/erika.h`](../crates/erika_capi/include/erika
 
 | Platform | Decode | Render | Audio | Status |
 |----------|--------|--------|-------|--------|
-| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **Available** |
-| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **Available** |
-| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **Available** |
+| macOS 14+ | VideoToolbox / compiled software decoders (scope above) | Metal | CoreAudio | **Available**; new codecs await device acceptance |
+| iOS 16+ | VideoToolbox / compiled software decoders (scope above) | Metal | AudioQueue | **Available**; new codecs await device acceptance |
+| tvOS 13+ (Apple TV) | VideoToolbox / compiled software decoders (scope above) | Metal | AudioQueue | **Available**; new codecs await device acceptance |
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **Available** |
 | Linux | -- | wgpu (planned) | -- | Planned |
-| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **Available**; device acceptance for this fork remains pending |
-| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **Available**; hardware-path device acceptance remains pending |
+| Android 8+ | MediaCodec (codecs listed above) / existing software decoders | wgpu (Vulkan + GLES fallback) | AAudio | **Available**; device acceptance for this fork remains pending |
+| HarmonyOS API 18+ | AVCodec / compiled software decoders (scope above) | wgpu (Vulkan) | OHAudio | **Available**; new codecs and hardware paths await device acceptance |
 
 ## Repository Structure
 
@@ -162,7 +169,7 @@ docs/                     Architecture and embedding documentation
 # Build FFmpeg (LGPL profile)
 cargo run -p xtask -- deps build --profile lgpl
 
-# Build the AV1/AVIF native dependencies
+# Build this fork's native dependencies
 cargo run -p xtask -- deps build --profile lgpl
 
 # Check dependency status

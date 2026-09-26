@@ -16,15 +16,24 @@
 ## この fork のメディア範囲
 
 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` は既存の crate、C ABI、Flutter/ArkTS
-package 名、cross-platform rendering interface を維持し、visual media を次に限定します。
+package 名、cross-platform rendering interface を維持し、メディアの対応範囲を次のように定めます。
 
-- MP4/MOV、Matroska/MKV、WebM、IVF、raw AV1/OBU の動的 AV1 video。
-- 単一の静的 primary image の AVIF。animated AVIF と image sequence は互換性対象外で、EOF 後も decode 済み image を surface に保持します。
-- 音声のみ AV1 playback の付随機能です。字幕と弾幕は specialized runtime から削除済みです。audio-only media と他の visual codec は拒否します。
+- AV1 動画は各プラットフォームで引き続き対応し、MP4/MOV、Matroska/MKV、WebM、IVF、raw AV1/OBU を扱います。
+- Android は AV1、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9 の MediaCodec バックエンドを有効にします。
+- iOS、macOS、tvOS は FFmpeg 8.1.2 の VideoToolbox バックエンドを有効にします：AV1、H.263、H.264、HEVC、MPEG-1、MPEG-2、MPEG-4、ProRes、VP9。
+- HarmonyOS は AV1、H.263、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9 を AVCodec に対応付けます。
+- これらのプラットフォームでは対応するビットストリーム parser と一般的なコンテナーの demuxer も有効にします。Windows の動画対応は引き続き AV1 に限定されます。
+- 静止画の AVIF、HEIF/HEIC、JPEG は引き続き対応し、デコードした画像を描画サーフェスに保持します。アニメーションと画像シーケンスの互換性は保証しません。
+- 音声は動画再生の付随機能で、音声のみの入力は非対応です。字幕と弾幕は専用ランタイムから削除済みです。
+
+codec profile、画像サイズ、出力形式の対応可否は、端末上での初期化、デコード、描画結果で決まります。
+システム経路が使えない場合はビルド済みのソフトウェアデコーダーを試し、AV1 には dav1d を使います。
+利用できる経路がなければエラーを返します。任意の形式や全 profile のハードウェアデコード・ゼロコピー描画を保証するものではありません。
+PNG、WebP など、記載のない入力は非対応です。
 
 ## 機能
 
-- **AV1 hardware decode** -- VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android)、hardware category AVCodec (HarmonyOS)。利用不可時は明示的に dav1d へ fallback
+- **プラットフォームのデコード** -- VideoToolbox (macOS/iOS/tvOS)、AV1 D3D11VA/DXVA2 (Windows)、MediaCodec (Android)、AVCodec (HarmonyOS)。上記の範囲で端末の能力を使い、ソフトウェアへの fallback を保持
 - **ゼロコピーレンダリング** -- CVPixelBuffer → MTLTexture (Apple)、D3D11VA texture interop (Windows)、MediaCodec Surface → AHardwareBuffer/Vulkan (Android)、AVCodec Surface → NativeBuffer/Vulkan (HarmonyOS)。buffer output と software frame は明示的な CPU upload を使用
 - **HDR/EDR 出力** -- Apple EDR、Windows HDR10、Android FP16 extended-linear scRGB negotiation と明示的な SDR fallback
 - **Metal ネイティブレンダラー** -- YCbCr サンプリング、色空間変換、トーンマッピングを単一レンダーパスで実行 (macOS/iOS/tvOS)
@@ -89,7 +98,7 @@ prebuilt mode は明示的に失敗し、upstream の full-codec binary へ fall
 ### OpenHarmony パッケージ
 
 この fork は OHPM package をまだ公開していません。`packages/erika_ohos` の source を
-組み込んでください。同名の upstream package はこの fork の AV1/AVIF-only contract を持ちません。
+組み込んでください。同名の upstream package は、この fork の上記のプラットフォーム別メディア範囲を示すものではありません。
 
 このパッケージは Flutter に依存しません。`ErikaPlayer` API と
 `XComponent` サーフェスの設定は
@@ -110,13 +119,13 @@ prebuilt mode は明示的に失敗し、upstream の full-codec binary へ fall
 
 | プラットフォーム | デコード | レンダリング | 音声 | 状態 |
 |----------------|---------|-------------|------|------|
-| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **利用可能** |
-| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **利用可能** |
-| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **利用可能** |
+| macOS 14+ | VideoToolbox / ビルド済みソフトウェアデコーダー（範囲は上記参照） | Metal | CoreAudio | **利用可能**。追加 codec の実機検証は未実施 |
+| iOS 16+ | VideoToolbox / ビルド済みソフトウェアデコーダー（範囲は上記参照） | Metal | AudioQueue | **利用可能**。追加 codec の実機検証は未実施 |
+| tvOS 13+ (Apple TV) | VideoToolbox / ビルド済みソフトウェアデコーダー（範囲は上記参照） | Metal | AudioQueue | **利用可能**。追加 codec の実機検証は未実施 |
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **利用可能** |
 | Linux | -- | wgpu (計画中) | -- | 計画中 |
-| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **利用可能**。この fork の実機 acceptance は未実施 |
-| HarmonyOS API 18+ | AV1 hardware AVCodec / dav1d | wgpu (Vulkan) | OHAudio | **利用可能**。hardware path の実機 acceptance は未実施 |
+| Android 8+ | MediaCodec（codec 範囲は上記参照）/ 既存のソフトウェアデコーダー | wgpu (Vulkan + GLES fallback) | AAudio | **利用可能**。この fork の実機 acceptance は未実施 |
+| HarmonyOS API 18+ | AVCodec / ビルド済みソフトウェアデコーダー（範囲は上記参照） | wgpu (Vulkan) | OHAudio | **利用可能**。追加 codec と hardware path の実機検証は未実施 |
 
 ## リポジトリ構成
 
@@ -158,7 +167,7 @@ docs/                     アーキテクチャと組み込みドキュメント
 # FFmpeg のビルド (LGPL プロファイル)
 cargo run -p xtask -- deps build --profile lgpl
 
-# AV1/AVIF native dependency のビルド
+# この fork の native dependency のビルド
 cargo run -p xtask -- deps build --profile lgpl
 
 # 依存関係の状態確認

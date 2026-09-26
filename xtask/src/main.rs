@@ -237,7 +237,10 @@ impl NativeDependencyProfile {
                 "--enable-jni",
                 "--enable-mediacodec",
                 "--enable-libdav1d",
-                "--enable-decoder=av1_mediacodec,libdav1d",
+                "--enable-decoder=av1_mediacodec,h264_mediacodec,hevc_mediacodec,mpeg2_mediacodec,mpeg4_mediacodec,vp8_mediacodec,vp9_mediacodec,libdav1d,mp2",
+                "--enable-parser=h264,hevc,mpegvideo,mpeg4video,vp8,vp9",
+                "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb",
+                "--enable-demuxer=h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi",
             ]);
             // FFmpeg's 32-bit external and inline x86 assembly still emits
             // absolute R_386_32 relocations even with CONFIG_PIC enabled.
@@ -248,11 +251,23 @@ impl NativeDependencyProfile {
                 flags.push("--disable-asm");
             }
         } else if target.is_apple() {
+            // VideoToolbox is attached to FFmpeg's native decoders, unlike
+            // MediaCodec's standalone wrappers. Keep dav1d for AV1 fallback.
             flags.extend([
                 "--enable-videotoolbox",
                 "--enable-libdav1d",
-                "--enable-decoder=libdav1d",
-                "--enable-hwaccel=av1_videotoolbox",
+                "--enable-decoder=av1,h263,h264,hevc,mpeg1video,mpeg2video,mpeg4,prores,vp9,libdav1d,mp2",
+                "--enable-hwaccel=av1_videotoolbox,h263_videotoolbox,h264_videotoolbox,hevc_videotoolbox,mpeg1_videotoolbox,mpeg2_videotoolbox,mpeg4_videotoolbox,prores_videotoolbox,vp9_videotoolbox",
+                "--enable-parser=h263,h264,mpegvideo,mpeg4video,vp9",
+                "--enable-demuxer=h263,h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi",
+            ]);
+        } else if target.is_ohos() {
+            flags.extend([
+                "--enable-libdav1d",
+                "--enable-decoder=libdav1d,mp2",
+                "--enable-parser=h263,h264,mpegvideo,mpeg4video,vp8,vp9",
+                "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb",
+                "--enable-demuxer=h263,h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi",
             ]);
         } else if target.uses_dav1d() {
             flags.extend(["--enable-libdav1d", "--enable-decoder=libdav1d"]);
@@ -683,7 +698,7 @@ fn print_dependency_plan(profile: NativeDependencyProfile, target: NativeTarget)
     for flag in profile.ffmpeg_configure_flags_for_target(target) {
         println!("  {flag}");
     }
-    println!("subtitle and danmaku dependencies are excluded from this AV1/AVIF profile");
+    println!("subtitle and danmaku dependencies are excluded from this native dependency profile");
 }
 
 fn fetch_dependency_sources(layout: &WorkspaceLayout, all: bool) -> Result<()> {
@@ -4563,17 +4578,19 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_profiles_exclude_native_and_non_av1_visual_decoders() {
+    fn ffmpeg_base_profiles_limit_visual_software_decoders_to_images() {
         for profile in [
             NativeDependencyProfile::Lgpl,
             NativeDependencyProfile::GplFull,
         ] {
             let flags = profile.ffmpeg_configure_flags();
             assert!(flags.contains(&"--disable-everything"));
-            assert!(flags.contains(&"--enable-demuxer=mov,matroska,av1,obu,ivf"));
+            assert!(flags.contains(&"--enable-demuxer=mov,matroska,av1,obu,ivf,image2,jpeg_pipe"));
             assert!(flags.contains(&"--enable-bsf=extract_extradata"));
             assert!(
-                flags.contains(&"--enable-parser=av1,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio")
+                flags.contains(
+                    &"--enable-parser=av1,hevc,aac,ac3,dca,mlp,opus,vorbis,flac,mpegaudio"
+                )
             );
 
             let decoders = flags
@@ -4581,17 +4598,17 @@ mod tests {
                 .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
                 .flat_map(|value| value.split(','))
                 .collect::<HashSet<_>>();
+            assert!(decoders.contains("hevc"));
+            assert!(decoders.contains("mjpeg"));
             for forbidden in [
                 "av1",
                 "h264",
-                "hevc",
                 "vp8",
                 "vp9",
                 "mpeg1video",
                 "mpeg2video",
                 "mpeg4",
                 "vc1",
-                "mjpeg",
                 "flv",
                 "theora",
                 "ass",
@@ -4610,7 +4627,7 @@ mod tests {
     }
 
     #[test]
-    fn every_target_uses_dav1d_without_the_native_ffmpeg_av1_decoder() {
+    fn every_target_keeps_dav1d_and_only_apple_explicitly_enables_native_av1() {
         let targets = [
             NativeTarget::Host,
             NativeTarget::Aarch64Macos,
@@ -4644,48 +4661,155 @@ mod tests {
                     decoders.contains("libdav1d"),
                     "missing dav1d for {target:?}"
                 );
-                assert!(
-                    !decoders.contains("av1"),
-                    "native FFmpeg AV1 decoder enabled for {target:?}"
-                );
+                assert_eq!(decoders.contains("av1"), target.is_apple());
+                if !target.is_android() {
+                    assert!(!flags.contains(&"--enable-mediacodec"));
+                    assert!(
+                        !decoders
+                            .iter()
+                            .any(|decoder| decoder.ends_with("_mediacodec"))
+                    );
+                }
+                if !target.is_android() && !target.is_apple() && !target.is_ohos() {
+                    let demuxers = flags
+                        .iter()
+                        .filter(|flag| flag.starts_with("--enable-demuxer="))
+                        .collect::<Vec<_>>();
+                    let base_demuxers = profile
+                        .ffmpeg_configure_flags()
+                        .iter()
+                        .filter(|flag| flag.starts_with("--enable-demuxer="))
+                        .collect::<Vec<_>>();
+                    assert_eq!(demuxers, base_demuxers);
+                }
             }
         }
     }
 
     #[test]
-    fn android_ffmpeg_plan_enables_mediacodec_without_videotoolbox() {
+    fn android_ffmpeg_plan_enables_all_video_mediacodec_wrappers_and_input_formats() {
         for profile in [
             NativeDependencyProfile::Lgpl,
             NativeDependencyProfile::GplFull,
         ] {
-            let flags = profile.ffmpeg_configure_flags_for_target(NativeTarget::X86_64Android);
-            assert!(flags.contains(&"--enable-jni"));
-            assert!(flags.contains(&"--enable-mediacodec"));
-            assert!(flags.contains(&"--enable-libdav1d"));
-            assert!(
-                flags
+            let base_decoders = profile
+                .ffmpeg_configure_flags()
+                .iter()
+                .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
+                .flat_map(|value| value.split(','))
+                .collect::<HashSet<_>>();
+            for target in [
+                NativeTarget::Aarch64Android,
+                NativeTarget::Armv7Android,
+                NativeTarget::X86_64Android,
+                NativeTarget::I686Android,
+            ] {
+                let flags = profile.ffmpeg_configure_flags_for_target(target);
+                assert!(flags.contains(&"--enable-jni"));
+                assert!(flags.contains(&"--enable-mediacodec"));
+                assert!(flags.contains(&"--enable-libdav1d"));
+                let decoders = flags
                     .iter()
-                    .any(|flag| { flag == &"--enable-decoder=av1_mediacodec,libdav1d" })
-            );
-            assert!(!flags.iter().any(|flag| flag.contains("h264_mediacodec")));
-            assert!(!flags.iter().any(|flag| flag.contains("vp8_mediacodec")));
-            assert!(!flags.iter().any(|flag| flag.contains("vp9_mediacodec")));
-            assert!(!flags.contains(&"--enable-videotoolbox"));
+                    .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
+                    .flat_map(|value| value.split(','))
+                    .collect::<HashSet<_>>();
+                let added_decoders = decoders
+                    .difference(&base_decoders)
+                    .copied()
+                    .collect::<HashSet<_>>();
+                assert_eq!(
+                    added_decoders,
+                    HashSet::from([
+                        "av1_mediacodec",
+                        "h264_mediacodec",
+                        "hevc_mediacodec",
+                        "mpeg2_mediacodec",
+                        "mpeg4_mediacodec",
+                        "vp8_mediacodec",
+                        "vp9_mediacodec",
+                        "libdav1d",
+                        "mp2",
+                    ]),
+                    "unexpected decoder additions for {target:?}"
+                );
+                assert!(flags.contains(&"--enable-parser=h264,hevc,mpegvideo,mpeg4video,vp8,vp9"));
+                assert!(flags.contains(&"--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb"));
+                assert!(
+                    flags.contains(&"--enable-demuxer=h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi")
+                );
+                assert!(!flags.contains(&"--enable-videotoolbox"));
+            }
         }
     }
 
     #[test]
-    fn apple_ffmpeg_plan_enables_videotoolbox_with_dav1d_fallback() {
-        for target in [
-            NativeTarget::Aarch64Macos,
-            NativeTarget::Aarch64Ios,
-            NativeTarget::Aarch64Tvos,
+    fn apple_ffmpeg_plan_enables_all_videotoolbox_decoders_with_dav1d_fallback() {
+        for profile in [
+            NativeDependencyProfile::Lgpl,
+            NativeDependencyProfile::GplFull,
         ] {
-            let flags = NativeDependencyProfile::Lgpl.ffmpeg_configure_flags_for_target(target);
-            assert!(flags.contains(&"--enable-videotoolbox"));
-            assert!(flags.contains(&"--enable-libdav1d"));
-            assert!(flags.contains(&"--enable-decoder=libdav1d"));
-            assert!(flags.contains(&"--enable-hwaccel=av1_videotoolbox"));
+            for target in [
+                NativeTarget::Aarch64Macos,
+                NativeTarget::X86_64Macos,
+                NativeTarget::Aarch64Ios,
+                NativeTarget::Aarch64IosSimulator,
+                NativeTarget::X86_64IosSimulator,
+                NativeTarget::Aarch64Tvos,
+                NativeTarget::Aarch64TvosSimulator,
+                NativeTarget::X86_64TvosSimulator,
+            ] {
+                let flags = profile.ffmpeg_configure_flags_for_target(target);
+                assert!(flags.contains(&"--enable-videotoolbox"));
+                assert!(flags.contains(&"--enable-libdav1d"));
+                let decoders = flags
+                    .iter()
+                    .filter_map(|flag| flag.strip_prefix("--enable-decoder="))
+                    .flat_map(|value| value.split(','))
+                    .collect::<HashSet<_>>();
+                let hwaccels = flags
+                    .iter()
+                    .filter_map(|flag| flag.strip_prefix("--enable-hwaccel="))
+                    .flat_map(|value| value.split(','))
+                    .collect::<HashSet<_>>();
+                assert_eq!(
+                    hwaccels,
+                    HashSet::from([
+                        "av1_videotoolbox",
+                        "h263_videotoolbox",
+                        "h264_videotoolbox",
+                        "hevc_videotoolbox",
+                        "mpeg1_videotoolbox",
+                        "mpeg2_videotoolbox",
+                        "mpeg4_videotoolbox",
+                        "prores_videotoolbox",
+                        "vp9_videotoolbox",
+                    ])
+                );
+                for decoder in [
+                    "av1",
+                    "h263",
+                    "h264",
+                    "hevc",
+                    "mpeg1video",
+                    "mpeg2video",
+                    "mpeg4",
+                    "prores",
+                    "vp9",
+                    "libdav1d",
+                    "mp2",
+                ] {
+                    assert!(
+                        decoders.contains(decoder),
+                        "missing {decoder} for {target:?}"
+                    );
+                }
+                assert!(flags.contains(&"--enable-parser=h263,h264,mpegvideo,mpeg4video,vp9"));
+                assert!(
+                    flags.contains(
+                        &"--enable-demuxer=h263,h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi"
+                    )
+                );
+            }
         }
     }
 
@@ -4713,14 +4837,31 @@ mod tests {
     }
 
     #[test]
-    fn ohos_ffmpeg_plan_uses_dav1d_without_avcodec_video_decoders() {
+    fn ohos_ffmpeg_plan_demuxes_system_codecs_without_extra_video_software_decoders() {
         let target = NativeTarget::Aarch64Ohos;
-        let flags = NativeDependencyProfile::Lgpl.ffmpeg_configure_flags_for_target(target);
-        assert!(target.uses_dav1d());
-        assert!(flags.contains(&"--enable-libdav1d"));
-        assert!(flags.contains(&"--enable-decoder=libdav1d"));
-        assert!(!flags.contains(&"--enable-mediacodec"));
-        assert!(!flags.contains(&"--enable-videotoolbox"));
+        for profile in [
+            NativeDependencyProfile::Lgpl,
+            NativeDependencyProfile::GplFull,
+        ] {
+            let flags = profile.ffmpeg_configure_flags_for_target(target);
+            assert!(target.uses_dav1d());
+            assert!(flags.contains(&"--enable-libdav1d"));
+            assert!(flags.contains(&"--enable-decoder=libdav1d,mp2"));
+            assert!(flags.contains(&"--enable-parser=h263,h264,mpegvideo,mpeg4video,vp8,vp9"));
+            assert!(flags.contains(&"--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb"));
+            assert!(
+                flags.contains(&"--enable-demuxer=h263,h264,hevc,m4v,mpegvideo,mpegps,mpegts,avi")
+            );
+            assert!(!flags.contains(&"--enable-mediacodec"));
+            assert!(!flags.contains(&"--enable-videotoolbox"));
+            let added_decoders = flags
+                .iter()
+                .filter(|flag| flag.starts_with("--enable-decoder="))
+                .filter(|flag| !profile.ffmpeg_configure_flags().contains(flag))
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(added_decoders, ["--enable-decoder=libdav1d,mp2"]);
+        }
     }
 
     #[test]
@@ -4857,7 +4998,7 @@ mod tests {
             &current, profile, target
         ));
 
-        let stale = current.replace("av1_mediacodec,libdav1d", "av1_mediacodec");
+        let stale = current.replace("h264_mediacodec,", "");
         assert!(!ffmpeg_build_marker_has_current_flags(
             &stale, profile, target
         ));

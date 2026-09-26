@@ -1,6 +1,6 @@
 # Flutter Embedding
 
-> **AV1/AVIF fork:** subtitle and danmaku features documented in legacy API
+> **Specialized fork:** subtitle and danmaku features documented in legacy API
 > examples below are compatibility-only and return an unsupported error. They
 > are not included in the native runtime.
 
@@ -101,12 +101,14 @@ external texture, takes that texture's surface as an `OHNativeWindow`, and
 attaches it to the presenter; wgpu then renders through Vulkan, using
 `VK_OHOS_surface` for window-system integration.
 
-This AV1/AVIF-only fork queries only the hardware-category `video/av1` AVCodec
-capability on HarmonyOS, validates the coded size, and creates the decoder by
-the reported codec name. It never selects a system software AVCodec. Surface
-output uses the existing NativeBuffer import; buffer output uses CPU upload.
-Any capability, open, runtime, seek-reopen, or import failure falls directly to
-dav1d. Device-side hardware-path acceptance remains pending.
+HarmonyOS maps AV1, H.263, H.264, HEVC, MPEG-2, MPEG-4, VP8, and VP9 to AVCodec.
+AV1 queries hardware-only capability, validates the coded size, and creates the
+decoder by name, with dav1d fallback. Other mapped codecs use `CreateByMime`
+to let the system select its available decoder. Surface output uses
+NativeBuffer import; buffer and software output use CPU upload. Capability,
+open, runtime, seek-reopen, or import failures try a compiled software decoder
+and report an error if none is available. Device-side acceptance for new codecs
+and hardware paths remains pending.
 
 ## Transparent Video and Blend Modes
 

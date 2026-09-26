@@ -1,6 +1,6 @@
 # Flutter Embedding
 
-> **AV1/AVIF 专用 fork：**下文旧 API 示例中的字幕与弹幕接口仅保留兼容外形，
+> **专用 fork：**下文旧 API 示例中的字幕与弹幕接口仅保留兼容外形，
 > 调用会返回不支持错误，原生运行时不包含这些功能。
 
 [中文](flutter_embedding.zh.md) | [English](flutter_embedding.md) | [日本語](flutter_embedding.ja.md)
@@ -65,11 +65,11 @@ HarmonyOS 上请使用 `ErikaVideoView`。ArkTS 插件注册 Flutter 外部纹�
 surface 取为 `OHNativeWindow` 并 attach 给 presenter；wgpu 随后通过 Vulkan 渲染，
 窗口系统集成走 `VK_OHOS_surface`。
 
-此 AV1/AVIF 专用 fork 在 HarmonyOS 上只查询硬件类别的 `video/av1` AVCodec
-capability，校验编码尺寸后按返回的 codec name 创建 decoder，不选择系统软件
-AVCodec。Surface 输出复用现有 NativeBuffer 导入，buffer 输出走 CPU upload；能力、
-打开、运行、seek 重开或导入失败时直接回退 dav1d。硬件路径的 HarmonyOS 真机验收
-尚未执行。
+HarmonyOS 将 AV1、H.263、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9 映射到 AVCodec。
+AV1 仍查询硬件类别能力，校验编码尺寸后按名称创建解码器，并保留 dav1d 回退。
+其他映射使用 `CreateByMime`，由系统选择可用解码器。Surface 输出复用 NativeBuffer
+导入，buffer 和软件输出走 CPU upload。能力、打开、运行、seek 重开或导入失败时，
+尝试已编译的软件解码器；没有可用路径则报错。新增编码和硬件路径仍待真机验收。
 
 ## 透明视频与混合模式
 

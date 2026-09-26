@@ -15,19 +15,24 @@
 
 ## 此 fork 的媒体边界
 
-这是 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 的 AV1 / AVIF 专用分支，保留 Erika
-现有 crate、C ABI、Flutter/ArkTS 包名和跨平台渲染接口，但只接受下列视觉媒体：
+这是 `Nyaaaaaaaaaaaaaaaaaaaaaaaa/Erika` 的专用分支，保留 Erika
+现有 crate、C ABI、Flutter/ArkTS 包名和跨平台渲染接口，媒体边界如下：
 
-- AV1 动态视频：MP4/MOV、Matroska/MKV、WebM、IVF 和 raw AV1/OBU；
-- AVIF：单张静态主图，首帧呈现后保留在渲染表面；animated AVIF 和 image sequence 不作兼容承诺；
-- 音频仅作为 AV1 播放的附属能力，不代表支持纯音频文件；字幕和弹幕能力已从专用内核删除。
+- AV1 视频在各平台保留支持，容器包括 MP4/MOV、Matroska/MKV、WebM、IVF 和 raw AV1/OBU。
+- Android 启用 MediaCodec 后端：AV1、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9。
+- iOS、macOS、tvOS 启用 FFmpeg 8.1.2 的 VideoToolbox 后端：AV1、H.263、H.264、HEVC、MPEG-1、MPEG-2、MPEG-4、ProRes、VP9。
+- HarmonyOS 启用 AVCodec 映射：AV1、H.263、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9。
+- 上述平台同时启用对应的码流解析和常见容器解封装；Windows 的动态视频范围仍为 AV1。
+- 静态图像保留 AVIF、HEIF/HEIC、JPEG 支持，解码后的图像保留在渲染表面；动画及图像序列不作兼容承诺。
+- 音频仅作为视频播放的附属能力，不支持纯音频输入；字幕和弹幕能力已从专用内核删除。
 
-H.264、HEVC/HEIC、VP8/VP9、MPEG、JPEG、PNG、WebP 和纯音频输入会通过
-现有错误通道被明确拒绝。
+具体 codec profile、尺寸和输出格式是否可用，由设备解码器初始化、解码及渲染结果决定。
+系统路径不可用时尝试已编译的软件解码器；AV1 软件解码使用 dav1d。没有可用路径时通过现有错误通道报错。
+这不代表设备支持任意格式，也不保证所有 profile 都能硬件解码或零拷贝呈现。PNG、WebP 等未列出的输入不在支持范围内。
 
 ## 特性
 
-- **AV1 硬件加速解码** — VideoToolbox (macOS/iOS/tvOS)、D3D11VA/DXVA2 (Windows)、MediaCodec (Android) 与硬件类别 AVCodec (HarmonyOS)，不可用时明确回退 dav1d
+- **平台解码** — VideoToolbox (macOS/iOS/tvOS)、AV1 D3D11VA/DXVA2 (Windows)、MediaCodec (Android) 与 AVCodec (HarmonyOS)，按上文范围使用设备能力并保留软件回退
 - **零拷贝渲染** — Apple CVPixelBuffer → MTLTexture、Windows D3D11VA 纹理互操作、Android MediaCodec Surface → AHardwareBuffer/Vulkan、HarmonyOS AVCodec Surface → NativeBuffer/Vulkan；buffer 输出和软件帧走明确的 CPU upload
 - **HDR/EDR 输出** — Apple EDR、Windows HDR10，以及 Android FP16 extended-linear scRGB 协商与明确 SDR 回退
 - **原生 Metal 渲染器** — YCbCr 采样、色彩空间转换和 tone mapping，一次 render pass 完成 (macOS/iOS/tvOS)
@@ -89,12 +94,12 @@ ErikaVideoView(player: player)
 `ERIKA_PREBUILT_REPOSITORY` 覆盖。只有调试 Erika 源码时才设置
 `ERIKA_FORCE_SOURCE_BUILD=1`，预编译失败不会回退下载上游全格式二进制。
 
-上游 pub.dev 包不代表本 fork 的 AV1/AVIF 支持边界。
+上游 pub.dev 包不代表本 fork 上述按平台区分的媒体边界。
 
 ### HarmonyOS NEXT package
 
 此 fork 尚未发布 OHPM 包；请从 `packages/erika_ohos` 源码集成。上游同名
-OHPM 包不代表本 fork 的 AV1/AVIF 支持边界。
+OHPM 包不代表本 fork 上述按平台区分的媒体边界。
 
 See the [HarmonyOS NEXT package guide](packages/erika_ohos/README.md) for the
 `ErikaPlayer` API and `XComponent` surface setup.
@@ -119,13 +124,13 @@ Erika 提供两组 C ABI 入口，适配不同嵌入场景：
 
 | 平台 | 解码 | 渲染 | 音频 | 状态 |
 |------|------|------|------|------|
-| macOS 14+ | AV1 VideoToolbox / dav1d | Metal | CoreAudio | **可用** |
-| iOS 16+ | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **可用** |
-| tvOS 13+ (Apple TV) | AV1 VideoToolbox / dav1d | Metal | AudioQueue | **可用** |
+| macOS 14+ | VideoToolbox / 已编译的软件解码器（范围见上文） | Metal | CoreAudio | **可用**；新增格式待真机验收 |
+| iOS 16+ | VideoToolbox / 已编译的软件解码器（范围见上文） | Metal | AudioQueue | **可用**；新增格式待真机验收 |
+| tvOS 13+ (Apple TV) | VideoToolbox / 已编译的软件解码器（范围见上文） | Metal | AudioQueue | **可用**；新增格式待真机验收 |
 | Windows 10+ | AV1 D3D11VA/DXVA2 / software | Direct3D 11 | WASAPI | **可用** |
 | Linux | — | wgpu (planned) | — | 规划中 |
-| Android 8+ | AV1 MediaCodec / dav1d | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
-| HarmonyOS NEXT 5.1 / API 18+ | AV1 硬件 AVCodec / dav1d | XComponent + OHNativeWindow，10-bit PQ / SDR 回退，DisplaySoloist VSync | OHAudio | **源码与构建链已接入**；HDR 真机验收待执行 |
+| Android 8+ | MediaCodec（codec 范围见上文）/ 现有软件解码器 | wgpu (Vulkan + GLES fallback) | AAudio | **可用** |
+| HarmonyOS NEXT 5.1 / API 18+ | AVCodec / 已编译的软件解码器（范围见上文） | XComponent + OHNativeWindow，10-bit PQ / SDR 回退，DisplaySoloist VSync | OHAudio | **源码与构建链已接入**；新增格式及 HDR 真机验收待执行 |
 
 ## 仓库结构
 

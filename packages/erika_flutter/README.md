@@ -1,6 +1,6 @@
 # erika_flutter
 
-> This AV1/AVIF-specialized package does not support subtitles or danmaku.
+> This specialized package does not support subtitles or danmaku.
 > Legacy Dart methods remain temporarily for compatibility and fail explicitly.
 
 Flutter plugin for the Erika media playback engine.
@@ -267,12 +267,14 @@ Use `ErikaVideoView` on HarmonyOS. It registers a Flutter external texture,
 obtains the texture surface as an `OHNativeWindow`, and renders through wgpu
 Vulkan. Audio uses OHAudio with interleaved f32 PCM.
 
-This AV1/AVIF-specialized fork queries the hardware-only `video/av1` AVCodec
-capability and validates the coded size before creating the decoder by its
-reported codec name. It never selects the recommended software AVCodec: missing
-capability, unsupported dimensions, or any open/runtime failure falls back
-directly to dav1d. Surface output uses the NativeBuffer/Vulkan path; AVCodec
-buffer output and dav1d use CPU upload. This policy applies to video playback.
+HarmonyOS maps AV1, H.263, H.264, HEVC, MPEG-2, MPEG-4, VP8, and VP9 to AVCodec.
+AV1 queries hardware-only capability, validates the coded size, and creates the
+decoder by name; missing support falls back to dav1d. Other mapped codecs use
+`CreateByMime`, allowing the system to select its available decoder. If that
+path fails, Erika tries an existing software decoder and reports an error if
+none is available. Surface output uses NativeBuffer/Vulkan; buffer and software
+output use CPU upload. Specific profiles, sizes, and rendering paths depend on
+the device. New formats still require device acceptance.
 
 Static AVIF uses a separate decode-once path: one AV1 frame is decoded with the
 software decoder into CPU-readable planes, without creating a video player or

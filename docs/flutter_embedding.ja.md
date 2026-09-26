@@ -1,6 +1,6 @@
 # Flutter Embedding
 
-> **AV1/AVIF 専用 fork:** 以下の旧 API 例にある subtitle/danmaku は互換用の
+> **専用 fork:** 以下の旧 API 例にある subtitle/danmaku は互換用の
 > shell のみで、unsupported error を返します。native runtime に実装は含まれません。
 
 [中文](flutter_embedding.zh.md) | [English](flutter_embedding.md) | [日本語](flutter_embedding.ja.md)
@@ -69,12 +69,13 @@ texture を登録し、その texture の surface を `OHNativeWindow` として
 presenter に attach します。wgpu はその上で Vulkan 描画を行い、window system
 integration には `VK_OHOS_surface` を使います。
 
-この AV1/AVIF 専用 fork は HarmonyOS で hardware category の `video/av1` AVCodec
-capability のみを照会し、coded size を検証して返された codec name で decoder を
-作成します。system software AVCodec は選択しません。Surface output は既存の
-NativeBuffer import、buffer output は CPU upload を使い、capability、open、runtime、
-seek reopen、import failure は直接 dav1d へ fallback します。hardware path の実機
-acceptance は未実施です。
+HarmonyOS は AV1、H.263、H.264、HEVC、MPEG-2、MPEG-4、VP8、VP9 を AVCodec に対応付けます。
+AV1 は引き続き hardware category の能力とサイズを確認し、返された名前で decoder を
+作成します。fallback は dav1d です。他の codec は `CreateByMime` でシステムに
+利用可能な decoder を選択させます。Surface は NativeBuffer import、buffer と software
+出力は CPU upload を使います。能力、open、runtime、seek reopen、import の失敗時は
+ビルド済み software decoder を試し、利用可能な経路がなければエラーを返します。
+追加 codec と hardware path の実機検証は未実施です。
 
 ## 透明 video と blend mode
 

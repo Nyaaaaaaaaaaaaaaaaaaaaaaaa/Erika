@@ -985,10 +985,9 @@ impl Decoder {
         }
         let (codec, find_operation) = match config.backend {
             DecoderBackend::Software => software_decoder(codec_id),
-            DecoderBackend::MediaCodec => (
-                mediacodec_decoder(codec_id),
-                "avcodec_find_decoder_by_name(MediaCodec)",
-            ),
+            DecoderBackend::MediaCodec => {
+                (mediacodec_decoder(codec_id), "av_codec_iterate(MediaCodec)")
+            }
             DecoderBackend::VideoToolbox => videotoolbox_decoder(codec_id),
             DecoderBackend::D3d11va => (
                 unsafe { sys::avcodec_find_decoder(codec_id) },
@@ -1392,9 +1391,14 @@ impl Decoder {
             sys::AVCodecID_AV_CODEC_ID_AV1 => OhosVideoCodec::Av1,
             sys::AVCodecID_AV_CODEC_ID_H264 => OhosVideoCodec::Avc,
             sys::AVCodecID_AV_CODEC_ID_HEVC => OhosVideoCodec::Hevc,
+            sys::AVCodecID_AV_CODEC_ID_H263 => OhosVideoCodec::H263,
+            sys::AVCodecID_AV_CODEC_ID_MPEG2VIDEO => OhosVideoCodec::Mpeg2,
+            sys::AVCodecID_AV_CODEC_ID_MPEG4 => OhosVideoCodec::Mpeg4,
+            sys::AVCodecID_AV_CODEC_ID_VP8 => OhosVideoCodec::Vp8,
+            sys::AVCodecID_AV_CODEC_ID_VP9 => OhosVideoCodec::Vp9,
             _ => {
                 return Err(FfmpegError::OhosAvCodec(format!(
-                    "unsupported codec id {codec_id}; AVCodec hardware decoding supports AV1, H.264 and HEVC"
+                    "no HarmonyOS AVCodec mapping for codec id {codec_id}"
                 )));
             }
         };
@@ -1637,31 +1641,49 @@ fn software_decoder(codec_id: sys::AVCodecID) -> (*const sys::AVCodec, &'static 
         );
     }
     (
-        unsafe { sys::avcodec_find_decoder(codec_id) },
-        "avcodec_find_decoder",
+        find_decoder(codec_id, |codec| {
+            codec.capabilities & sys::AV_CODEC_CAP_HARDWARE as c_int == 0
+        }),
+        "av_codec_iterate(software)",
     )
 }
 
 fn videotoolbox_decoder(codec_id: sys::AVCodecID) -> (*const sys::AVCodec, &'static str) {
-    if codec_id == sys::AVCodecID_AV_CODEC_ID_AV1 {
-        return (
-            unsafe { sys::avcodec_find_decoder_by_name(c"av1".as_ptr()) },
-            "avcodec_find_decoder_by_name(av1)",
-        );
-    }
     (
-        unsafe { sys::avcodec_find_decoder(codec_id) },
-        "avcodec_find_decoder",
+        find_decoder(codec_id, |codec| {
+            hardware_pixel_format(codec, sys::AVHWDeviceType_AV_HWDEVICE_TYPE_VIDEOTOOLBOX)
+                .is_some()
+        }),
+        "av_codec_iterate(VideoToolbox)",
     )
 }
 
 fn mediacodec_decoder(codec_id: sys::AVCodecID) -> *const sys::AVCodec {
-    let name = if codec_id == sys::AVCodecID_AV_CODEC_ID_AV1 {
-        b"av1_mediacodec\0".as_slice()
-    } else {
-        return ptr::null();
-    };
-    unsafe { sys::avcodec_find_decoder_by_name(name.as_ptr().cast()) }
+    // Discover compiled MediaCodec decoders; opening one checks device support.
+    find_decoder(codec_id, |codec| {
+        !codec.wrapper_name.is_null()
+            && unsafe { CStr::from_ptr(codec.wrapper_name) } == c"mediacodec"
+    })
+}
+
+fn find_decoder(
+    codec_id: sys::AVCodecID,
+    matches: impl Fn(&sys::AVCodec) -> bool,
+) -> *const sys::AVCodec {
+    let mut opaque = ptr::null_mut();
+    loop {
+        let codec = unsafe { sys::av_codec_iterate(&mut opaque) };
+        if codec.is_null() {
+            return ptr::null();
+        }
+        let descriptor = unsafe { &*codec };
+        if descriptor.id == codec_id
+            && unsafe { sys::av_codec_is_decoder(codec) } != 0
+            && matches(descriptor)
+        {
+            return codec;
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -4420,6 +4442,11 @@ unsafe extern "C" fn select_hw_format(
             }
             index += 1;
         }
+        // Keep VideoToolbox failure explicit so PlaybackSession can reopen the
+        // software decoder and record the backend transition accurately.
+        if target == sys::AVPixelFormat_AV_PIX_FMT_VIDEOTOOLBOX {
+            return sys::AVPixelFormat_AV_PIX_FMT_NONE;
+        }
     }
     unsafe { sys::avcodec_default_get_format(context, formats) }
 }
@@ -4445,11 +4472,60 @@ mod tests {
         );
     }
 
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     #[test]
-    fn videotoolbox_uses_ffmpeg_av1_decoder() {
-        let (codec, operation) = videotoolbox_decoder(sys::AVCodecID_AV_CODEC_ID_AV1);
-        assert_eq!(operation, "avcodec_find_decoder_by_name(av1)");
-        assert!(!codec.is_null());
+    fn apple_build_registers_videotoolbox_decoders() {
+        for codec_id in [
+            sys::AVCodecID_AV_CODEC_ID_AV1,
+            sys::AVCodecID_AV_CODEC_ID_H263,
+            sys::AVCodecID_AV_CODEC_ID_H264,
+            sys::AVCodecID_AV_CODEC_ID_HEVC,
+            sys::AVCodecID_AV_CODEC_ID_MPEG1VIDEO,
+            sys::AVCodecID_AV_CODEC_ID_MPEG2VIDEO,
+            sys::AVCodecID_AV_CODEC_ID_MPEG4,
+            sys::AVCodecID_AV_CODEC_ID_PRORES,
+            sys::AVCodecID_AV_CODEC_ID_VP9,
+        ] {
+            let (codec, _) = videotoolbox_decoder(codec_id);
+            assert!(
+                !codec.is_null(),
+                "missing VideoToolbox decoder for {codec_id}"
+            );
+            assert_eq!(
+                hardware_pixel_format(codec, sys::AVHWDeviceType_AV_HWDEVICE_TYPE_VIDEOTOOLBOX),
+                Some(sys::AVPixelFormat_AV_PIX_FMT_VIDEOTOOLBOX),
+            );
+        }
+    }
+
+    #[test]
+    fn videotoolbox_does_not_silently_select_software_pixel_formats() {
+        let mut state = HardwareDecoderState {
+            device_ref: ptr::null_mut(),
+            frames_ref: ptr::null_mut(),
+            pixel_format: sys::AVPixelFormat_AV_PIX_FMT_VIDEOTOOLBOX,
+        };
+        let mut context = sys::AVCodecContext {
+            opaque: (&mut state as *mut HardwareDecoderState).cast(),
+            ..Default::default()
+        };
+        let software_only = [
+            sys::AVPixelFormat_AV_PIX_FMT_YUV420P,
+            sys::AVPixelFormat_AV_PIX_FMT_NONE,
+        ];
+        assert_eq!(
+            unsafe { select_hw_format(&mut context, software_only.as_ptr()) },
+            sys::AVPixelFormat_AV_PIX_FMT_NONE,
+        );
+        let hardware_available = [
+            sys::AVPixelFormat_AV_PIX_FMT_VIDEOTOOLBOX,
+            sys::AVPixelFormat_AV_PIX_FMT_YUV420P,
+            sys::AVPixelFormat_AV_PIX_FMT_NONE,
+        ];
+        assert_eq!(
+            unsafe { select_hw_format(&mut context, hardware_available.as_ptr()) },
+            sys::AVPixelFormat_AV_PIX_FMT_VIDEOTOOLBOX,
+        );
     }
 
     #[test]
@@ -4457,6 +4533,53 @@ mod tests {
         let (codec, operation) = software_decoder(sys::AVCodecID_AV_CODEC_ID_AV1);
         assert_eq!(operation, "avcodec_find_decoder_by_name(libdav1d)");
         assert!(!codec.is_null());
+    }
+
+    #[test]
+    fn software_fallback_never_selects_a_hardware_decoder() {
+        for codec_id in [
+            sys::AVCodecID_AV_CODEC_ID_H264,
+            sys::AVCodecID_AV_CODEC_ID_HEVC,
+            sys::AVCodecID_AV_CODEC_ID_MPEG2VIDEO,
+            sys::AVCodecID_AV_CODEC_ID_MPEG4,
+            sys::AVCodecID_AV_CODEC_ID_VP8,
+            sys::AVCodecID_AV_CODEC_ID_VP9,
+        ] {
+            let (codec, _) = software_decoder(codec_id);
+            if !codec.is_null() {
+                assert_eq!(
+                    unsafe { (*codec).capabilities } & sys::AV_CODEC_CAP_HARDWARE as c_int,
+                    0,
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn android_build_registers_all_mediacodec_video_decoders() {
+        for codec_id in [
+            sys::AVCodecID_AV_CODEC_ID_AV1,
+            sys::AVCodecID_AV_CODEC_ID_H264,
+            sys::AVCodecID_AV_CODEC_ID_HEVC,
+            sys::AVCodecID_AV_CODEC_ID_MPEG2VIDEO,
+            sys::AVCodecID_AV_CODEC_ID_MPEG4,
+            sys::AVCodecID_AV_CODEC_ID_VP8,
+            sys::AVCodecID_AV_CODEC_ID_VP9,
+        ] {
+            let codec = mediacodec_decoder(codec_id);
+            assert!(
+                !codec.is_null(),
+                "missing MediaCodec decoder for {codec_id}"
+            );
+            assert_ne!(unsafe { sys::av_codec_is_decoder(codec) }, 0);
+            assert_eq!(unsafe { (*codec).id }, codec_id);
+            assert_eq!(
+                unsafe { CStr::from_ptr((*codec).wrapper_name) },
+                c"mediacodec",
+            );
+        }
+        assert!(mediacodec_decoder(sys::AVCodecID_AV_CODEC_ID_NONE).is_null());
     }
 
     #[test]
