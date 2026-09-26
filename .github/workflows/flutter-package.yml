@@ -18,6 +18,12 @@ on:
       - ".github/workflows/flutter-package.yml"
       - "packages/erika_flutter/**"
   workflow_dispatch:
+    inputs:
+      consumer:
+        description: Consumer platforms to validate (package checks always run)
+        type: choice
+        default: all
+        options: [all, android, apple, windows, ohos]
 
 permissions:
   contents: read
@@ -82,7 +88,7 @@ jobs:
   android:
     name: Android app from isolated package
     needs: [changes, package]
-    if: needs.changes.outputs.android == 'true'
+    if: needs.changes.outputs.android == 'true' && (github.event_name != 'workflow_dispatch' || inputs.consumer == 'all' || inputs.consumer == 'android')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -134,18 +140,22 @@ jobs:
   apple:
     name: ${{ matrix.platform }} app from isolated package
     needs: [changes, package]
-    if: needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos == 'true'
+    if: (needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos == 'true') && (github.event_name != 'workflow_dispatch' || inputs.consumer == 'all' || inputs.consumer == 'apple')
     runs-on: macos-26
     timeout-minutes: 120
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "11.0"
-      IPHONEOS_DEPLOYMENT_TARGET: "13.0"
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJSON(needs.changes.outputs.apple) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Select Apple deployment target
+        run: |
+          if [[ "${{ matrix.platform }}" == ios ]]; then
+            echo "IPHONEOS_DEPLOYMENT_TARGET=13.0" >> "$GITHUB_ENV"
+          else
+            echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'ios' && 'aarch64-apple-ios-sim,x86_64-apple-ios' || 'aarch64-apple-darwin,x86_64-apple-darwin' }}
@@ -162,22 +172,22 @@ jobs:
         if: matrix.platform == 'ios'
         with:
           target: aarch64-apple-ios-sim
-          toolchain: ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+          toolchain: ios-min13.0
       - uses: ./.github/actions/cache-native
         if: matrix.platform == 'ios'
         with:
           target: x86_64-apple-ios
-          toolchain: ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+          toolchain: ios-min13.0
       - uses: ./.github/actions/cache-native
         if: matrix.platform == 'macos'
         with:
           target: aarch64-apple-darwin
-          toolchain: macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}
+          toolchain: macos-min11.0
       - uses: ./.github/actions/cache-native
         if: matrix.platform == 'macos'
         with:
           target: x86_64-apple-darwin
-          toolchain: macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}
+          toolchain: macos-min11.0
       - name: Create isolated consumer
         shell: bash
         env:
@@ -201,7 +211,7 @@ jobs:
   windows:
     name: Windows app from isolated package
     needs: [changes, package]
-    if: needs.changes.outputs.windows == 'true'
+    if: needs.changes.outputs.windows == 'true' && (github.event_name != 'workflow_dispatch' || inputs.consumer == 'all' || inputs.consumer == 'windows')
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -264,7 +274,7 @@ jobs:
   openharmony:
     name: HarmonyOS NEXT bridge from isolated package
     needs: [changes, package]
-    if: needs.changes.outputs.ohos == 'true'
+    if: needs.changes.outputs.ohos == 'true' && (github.event_name != 'workflow_dispatch' || inputs.consumer == 'all' || inputs.consumer == 'ohos')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

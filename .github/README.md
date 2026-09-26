@@ -11,13 +11,19 @@ compilation and Flutter source consumers are selected from changed files:
 | Shared Apple prebuilt helper | Apple platform validation |
 | Shared native source, Cargo configuration, native recipes, or patches | Native platform workflows; mixed Flutter package changes also select the relevant source consumers |
 | CI selection/cache infrastructure | Full affected validation |
-| Manual CI workflow run | All jobs in that workflow |
+| Manual CI workflow run | All jobs by default; Flutter's `consumer` input can select one platform group |
 
 The reusable `ci-changes.yml` compares a push's complete before/after range and a
 pull request's merge-base/head range. Missing push history falls back to a full
 selection. It does not inspect only the last commit. Flutter source consumers
 are not newly triggered by native-only commits. The duplicate Flutter-package
 tvOS compile is owned by the existing native CI job instead.
+
+For a focused Flutter retry, select `consumer=apple`, `android`, `windows`, or
+`ohos`; package checks still run first. Wait for an existing run on the same
+branch to finish before dispatching, because workflow concurrency cancels older
+runs. Apple cache deployment descriptors must not export both iOS and macOS
+deployment target variables into the shared build environment.
 
 Release still builds every published platform and ABI. Its build commands,
 symbol checks, archive contents, and publishing gates remain unchanged.
