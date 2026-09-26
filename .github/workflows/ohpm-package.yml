@@ -74,6 +74,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: aarch64-unknown-linux-ohos
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ env.ERIKA_NATIVE_TARGET }}-${{ env.ERIKA_NATIVE_PROFILE }}-wgpu-sdk6.0-api18-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
 
       - uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad
         id: ohos_sdk
@@ -92,6 +95,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake make ninja-build pkg-config unzip
+
+      # The selected ref may predate the local cache action.
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
+            third_party/dist/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ env.ERIKA_NATIVE_TARGET }}-${{ env.ERIKA_NATIVE_PROFILE }}-sdk6.0-api18-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
 
       - name: Build and stage the matching Erika runtime
         shell: bash

@@ -6,6 +6,8 @@ on:
     paths:
       - ".cargo/**"
       - ".github/workflows/ohos.yml"
+      - ".github/actions/cache-native/**"
+      - "rust-toolchain*"
       - "Cargo.lock"
       - "Cargo.toml"
       - "crates/**"
@@ -19,6 +21,8 @@ on:
     paths:
       - ".cargo/**"
       - ".github/workflows/ohos.yml"
+      - ".github/actions/cache-native/**"
+      - "rust-toolchain*"
       - "Cargo.lock"
       - "Cargo.toml"
       - "crates/**"
@@ -89,6 +93,9 @@ jobs:
             echo "CXX_aarch64_unknown_linux_ohos=$NATIVE_ROOT/llvm/bin/aarch64-unknown-linux-ohos-clang++"
             echo "AR_aarch64_unknown_linux_ohos=$NATIVE_ROOT/llvm/bin/llvm-ar"
           } >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ohos-sdk6.0-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
       - name: Restore native dependencies
         id: native-cache
         uses: actions/cache/restore@v4
@@ -98,7 +105,7 @@ jobs:
             third_party/src
             third_party/build/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
             third_party/dist/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
-          key: native-v1-ohos-${{ env.ERIKA_NATIVE_TARGET }}-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ env.ERIKA_NATIVE_TARGET }}-${{ env.ERIKA_NATIVE_PROFILE }}-sdk6.0-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build OpenHarmony native dependencies
         run: >-
           cargo run --locked -p xtask -- deps build

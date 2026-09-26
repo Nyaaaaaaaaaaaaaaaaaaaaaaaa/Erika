@@ -61,13 +61,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}-lgpl-default-macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
+      # Explicit cache steps also support source tags predating the local cache action.
       - name: Cache native dependencies
         uses: actions/cache@v4
         with:
-          path: third_party
-          key: native-v2-macos-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/${{ matrix.target }}/${{ env.PROFILE }}
+            third_party/dist/${{ matrix.target }}/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.PROFILE }}-macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build native deps + erika_capi
         run: |
           cargo run -p xtask -- deps build --profile "$PROFILE" --target "${{ matrix.target }}"
@@ -144,13 +152,38 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
           components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-ios-all-lgpl-wgpu-staticlib-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - name: Cache native dependencies
+      - name: Cache iOS device native dependencies
         uses: actions/cache@v4
         with:
-          path: third_party
-          key: native-v2-ios-release-all-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/aarch64-apple-ios/${{ env.PROFILE }}
+            third_party/dist/aarch64-apple-ios/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-aarch64-apple-ios-${{ env.PROFILE }}-ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache iOS arm64 simulator native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/aarch64-apple-ios-sim/${{ env.PROFILE }}
+            third_party/dist/aarch64-apple-ios-sim/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-aarch64-apple-ios-sim-${{ env.PROFILE }}-ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache iOS x64 simulator native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/x86_64-apple-ios/${{ env.PROFILE }}
+            third_party/dist/x86_64-apple-ios/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-x86_64-apple-ios-${{ env.PROFILE }}-ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build native deps + erika_capi (device + simulators)
         # iOS links against the static lib only (XCFramework). Build just the
         # staticlib via `cargo rustc --crate-type staticlib` so the cdylib link
@@ -227,13 +260,38 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-tvos-all-lgpl-no-default-staticlib-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - name: Cache native dependencies
+      - name: Cache tvOS device native dependencies
         uses: actions/cache@v4
         with:
-          path: third_party
-          key: native-v2-tvos-release-all-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/aarch64-apple-tvos/${{ env.PROFILE }}
+            third_party/dist/aarch64-apple-tvos/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-aarch64-apple-tvos-${{ env.PROFILE }}-tvos-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache tvOS arm64 simulator native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/aarch64-apple-tvos-sim/${{ env.PROFILE }}
+            third_party/dist/aarch64-apple-tvos-sim/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-aarch64-apple-tvos-sim-${{ env.PROFILE }}-tvos-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache tvOS x64 simulator native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/x86_64-apple-tvos/${{ env.PROFILE }}
+            third_party/dist/x86_64-apple-tvos/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-x86_64-apple-tvos-${{ env.PROFILE }}-tvos-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build native deps + erika_capi (device + simulators)
         run: |
           set -euo pipefail
@@ -302,6 +360,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}-lgpl-default-msvc-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Verify native host architecture
         shell: pwsh
         run: |
@@ -350,8 +411,12 @@ jobs:
       - name: Cache native dependencies
         uses: actions/cache@v4
         with:
-          path: third_party
-          key: native-v2-windows-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/${{ matrix.target }}/${{ env.PROFILE }}
+            third_party/dist/${{ matrix.target }}/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.PROFILE }}-msvc-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Verify FFmpeg make shell
         shell: pwsh
         run: |
@@ -389,6 +454,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android-all-lgpl-wgpu-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Install Android NDK and native build tools
         run: |
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
@@ -400,11 +468,42 @@ jobs:
           echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$sdk_root/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$sdk_root/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
-      - name: Cache Android native dependencies
+      - name: Cache Android arm64 native dependencies
         uses: actions/cache@v4
         with:
-          path: third_party
-          key: native-v2-android-release-all-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/aarch64-linux-android/${{ env.PROFILE }}
+            third_party/dist/aarch64-linux-android/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-aarch64-linux-android-${{ env.PROFILE }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache Android armv7 native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/armv7-linux-androideabi/${{ env.PROFILE }}
+            third_party/dist/armv7-linux-androideabi/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-armv7-linux-androideabi-${{ env.PROFILE }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache Android x64 native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/x86_64-linux-android/${{ env.PROFILE }}
+            third_party/dist/x86_64-linux-android/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-x86_64-linux-android-${{ env.PROFILE }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
+      - name: Cache Android x86 native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cache
+            third_party/src
+            third_party/build/i686-linux-android/${{ env.PROFILE }}
+            third_party/dist/i686-linux-android/${{ env.PROFILE }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-i686-linux-android-${{ env.PROFILE }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build native deps + erika_capi (all ABIs)
         shell: bash
         run: |
@@ -490,6 +589,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: aarch64-unknown-linux-ohos
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ env.ERIKA_NATIVE_TARGET }}-lgpl-wgpu-sdk6.0-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Setup HarmonyOS NEXT SDK
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad # v1.0.1
@@ -534,7 +636,7 @@ jobs:
             third_party/src
             third_party/build/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
             third_party/dist/${{ env.ERIKA_NATIVE_TARGET }}/${{ env.ERIKA_NATIVE_PROFILE }}
-          key: native-v1-ohos-${{ env.ERIKA_NATIVE_TARGET }}-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ env.ERIKA_NATIVE_TARGET }}-${{ env.ERIKA_NATIVE_PROFILE }}-sdk6.0-api${{ env.OHOS_COMPATIBLE_SDK_VERSION }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}
       - name: Build OpenHarmony native dependencies
         run: >-
           cargo run --locked -p xtask -- deps build

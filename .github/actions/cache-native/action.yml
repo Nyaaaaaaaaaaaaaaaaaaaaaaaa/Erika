@@ -1,0 +1,35 @@
+name: Cache native dependencies
+description: Cache generated native dependencies for one target and toolchain.
+
+inputs:
+  target:
+    description: Rust target triple for the native dependencies.
+    required: true
+  profile:
+    description: Native dependency profile.
+    required: false
+    default: lgpl
+  toolchain:
+    description: Explicit SDK, API level, and deployment target cache identity.
+    required: true
+
+outputs:
+  cache-hit:
+    description: Whether an exact native dependency cache entry was restored.
+    value: ${{ steps.native-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Cache generated native dependencies
+      id: native-cache
+      uses: actions/cache@v4
+      with:
+        # Never restore tracked patches or vendored Rust sources over checkout.
+        path: |
+          third_party/cache
+          third_party/src
+          third_party/build/${{ inputs.target }}/${{ inputs.profile }}
+          third_party/dist/${{ inputs.target }}/${{ inputs.profile }}
+        # Build markers do not validate every toolchain input, so only use exact keys.
+        key: native-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ inputs.profile }}-${{ inputs.toolchain }}-${{ hashFiles('xtask/**', 'third_party/patches/**', '.github/actions/cache-native/action.yml') }}

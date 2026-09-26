@@ -4,11 +4,17 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - ".github/actions/**"
+      - ".github/scripts/**"
+      - ".github/workflows/ci-changes.yml"
       - ".github/workflows/flutter-package.yml"
       - "packages/erika_flutter/**"
   push:
     branches: [main]
     paths:
+      - ".github/actions/**"
+      - ".github/scripts/**"
+      - ".github/workflows/ci-changes.yml"
       - ".github/workflows/flutter-package.yml"
       - "packages/erika_flutter/**"
   workflow_dispatch:
@@ -24,12 +30,31 @@ env:
   PUB_HOSTED_URL: https://pub.dev
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+
   package:
     name: Pub package (isolated)
+    needs: changes
+    if: needs.changes.outputs.package == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Verify native artifact manifest
+        if: needs.changes.outputs.artifacts == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=packages/erika_flutter/native_artifacts.properties
+          version=$(sed -n 's/^ERIKA_NATIVE_VERSION=//p' "$manifest" | tr -d '\r')
+          mkdir -p "$RUNNER_TEMP/erika-checksums"
+          gh release download "v$version" --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/erika-checksums"
+          python3 .github/scripts/check_native_artifacts.py \
+            "$manifest" "$RUNNER_TEMP/erika-checksums/SHA256SUMS"
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -56,7 +81,8 @@ jobs:
 
   android:
     name: Android app from isolated package
-    needs: package
+    needs: [changes, package]
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -66,6 +92,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: flutter-android-aarch64-release-default-ndk${{ env.ANDROID_NDK_VERSION }}-api26-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - uses: android-actions/setup-android@v3
       - uses: subosito/flutter-action@v2
         with:
@@ -79,10 +108,10 @@ jobs:
           sudo apt-get install -y build-essential cmake make ninja-build pkg-config python3-venv
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: ./.github/actions/cache-native
         with:
-          path: ~/.gradle/caches/erika
-          key: erika-flutter-android-${{ hashFiles('packages/erika_flutter/native_artifacts.properties') }}
+          target: aarch64-linux-android
+          toolchain: ndk${{ env.ANDROID_NDK_VERSION }}-api26
       - name: Create isolated consumer
         shell: bash
         env:
@@ -100,37 +129,52 @@ jobs:
           flutter build apk --debug --target-platform android-arm64
 
   apple:
-    name: ${{ matrix.name }} app from isolated package
-    needs: package
+    name: ${{ matrix.platform }} app from isolated package
+    needs: [changes, package]
+    if: needs.changes.outputs.ios == 'true' || needs.changes.outputs.macos == 'true'
     runs-on: macos-26
     timeout-minutes: 120
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      IPHONEOS_DEPLOYMENT_TARGET: "13.0"
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: iOS simulator
-            platform: ios
-            build: flutter build ios --simulator --debug --no-codesign
-          - name: macOS
-            platform: macos
-            build: flutter build macos --debug
+        platform: ${{ fromJSON(needs.changes.outputs.apple) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios-sim,x86_64-apple-ios
+          targets: ${{ matrix.platform == 'ios' && 'aarch64-apple-ios-sim,x86_64-apple-ios' || 'aarch64-apple-darwin,x86_64-apple-darwin' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: flutter-${{ matrix.platform }}-universal-debug-${{ matrix.platform == 'ios' && 'wgpu-min13.0' || 'no-default-min11.0' }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - uses: actions/cache@v4
+      - uses: ./.github/actions/cache-native
+        if: matrix.platform == 'ios'
         with:
-          path: third_party
-          key: erika-flutter-${{ matrix.platform }}-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**', 'packages/erika_flutter/ios/*.podspec', 'packages/erika_flutter/tvos/*.podspec', 'packages/erika_flutter/macos/*.podspec') }}
-          restore-keys: erika-flutter-${{ matrix.platform }}-source-
-          save-always: true
+          target: aarch64-apple-ios-sim
+          toolchain: ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+      - uses: ./.github/actions/cache-native
+        if: matrix.platform == 'ios'
+        with:
+          target: x86_64-apple-ios
+          toolchain: ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+      - uses: ./.github/actions/cache-native
+        if: matrix.platform == 'macos'
+        with:
+          target: aarch64-apple-darwin
+          toolchain: macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}
+      - uses: ./.github/actions/cache-native
+        if: matrix.platform == 'macos'
+        with:
+          target: x86_64-apple-darwin
+          toolchain: macos-min${{ env.MACOSX_DEPLOYMENT_TARGET }}
       - name: Create isolated consumer
         shell: bash
         env:
@@ -145,56 +189,24 @@ jobs:
           flutter create --platforms=${{ matrix.platform }} --project-name erika_consumer "$root/app"
           cd "$root/app"
           flutter pub add erika_flutter --path ../erika_flutter
-          ${{ matrix.build }}
-
-  tvos:
-    name: tvOS runtime from isolated package
-    needs: package
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-      - name: Install native build tools
-        run: brew install nasm meson ninja pkg-config
-      - uses: actions/cache@v4
-        with:
-          path: third_party
-          key: erika-flutter-tvos-source-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
-      - name: Verify source-built tvOS simulator runtime
-        shell: bash
-        env:
-          TVOS_DEPLOYMENT_TARGET: "13.0"
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/erika-tvos"
-          mkdir -p "$root/erika_flutter"
-          git archive HEAD:packages/erika_flutter | tar -x -C "$root/erika_flutter"
-          cargo run --locked -p xtask -- deps build \
-            --profile lgpl --target aarch64-apple-tvos-sim
-          TVOS_SDKROOT="$(xcrun --sdk appletvsimulator --show-sdk-path)"
-          export SDKROOT="$TVOS_SDKROOT"
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_tvos_sim="--target=arm64-apple-tvos${TVOS_DEPLOYMENT_TARGET}-simulator -isysroot $TVOS_SDKROOT"
-          ERIKA_NATIVE_PROFILE=lgpl \
-          ERIKA_NATIVE_TARGET=aarch64-apple-tvos-sim \
-            cargo +nightly rustc -Z build-std=std,panic_abort --locked \
-              -p erika_capi --lib --release \
-              --target aarch64-apple-tvos-sim \
-              --no-default-features --crate-type staticlib
-          cp target/aarch64-apple-tvos-sim/release/liberika_capi.a \
-            "$root/liberika_capi.a"
-          lipo -info "$root/liberika_capi.a" | grep -Eq 'arm64|Non-fat'
+          if [[ "${{ matrix.platform }}" == ios ]]; then
+            flutter build ios --simulator --debug --no-codesign
+          else
+            flutter build macos --debug
+          fi
 
   windows:
     name: Windows app from isolated package
-    needs: package
+    needs: [changes, package]
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: flutter-windows-x86_64-debug-default-msvc-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -226,6 +238,10 @@ jobs:
           "LIBCLANG_PATH=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
           Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\NASM"
+      - uses: ./.github/actions/cache-native
+        with:
+          target: x86_64-pc-windows-msvc
+          toolchain: msvc
       - name: Create isolated consumer
         shell: pwsh
         env:
@@ -244,7 +260,8 @@ jobs:
 
   openharmony:
     name: HarmonyOS NEXT bridge from isolated package
-    needs: package
+    needs: [changes, package]
+    if: needs.changes.outputs.ohos == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -252,6 +269,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: aarch64-unknown-linux-ohos
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: flutter-ohos-aarch64-release-wgpu-sdk6.0-api18-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**', '.github/actions/cache-native/action.yml') }}
       - name: Setup HarmonyOS NEXT SDK
         id: ohos_sdk
         uses: openharmony-rs/setup-ohos-sdk@b312caf8a43bb836aa24c08f65f97e1f09a89cad
@@ -264,6 +284,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake make ninja-build pkg-config
+      - uses: ./.github/actions/cache-native
+        with:
+          target: aarch64-unknown-linux-ohos
+          toolchain: sdk6.0-api18
       - name: Build isolated bridge
         shell: bash
         env:

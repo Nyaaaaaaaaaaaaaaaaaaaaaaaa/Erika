@@ -1,4 +1,5 @@
 /target/
+/.github/scripts/__pycache__/
 /out/
 /.cargo/config.local.toml
 /third_party/cache/

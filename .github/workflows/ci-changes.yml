@@ -1,0 +1,51 @@
+name: Select CI checks
+
+on:
+  workflow_call:
+    outputs:
+      native:
+        value: ${{ jobs.changes.outputs.native }}
+      package:
+        value: ${{ jobs.changes.outputs.package }}
+      android:
+        value: ${{ jobs.changes.outputs.android }}
+      ios:
+        value: ${{ jobs.changes.outputs.ios }}
+      macos:
+        value: ${{ jobs.changes.outputs.macos }}
+      tvos:
+        value: ${{ jobs.changes.outputs.tvos }}
+      windows:
+        value: ${{ jobs.changes.outputs.windows }}
+      ohos:
+        value: ${{ jobs.changes.outputs.ohos }}
+      artifacts:
+        value: ${{ jobs.changes.outputs.artifacts }}
+      apple:
+        value: ${{ jobs.changes.outputs.apple }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.select.outputs.native }}
+      package: ${{ steps.select.outputs.package }}
+      android: ${{ steps.select.outputs.android }}
+      ios: ${{ steps.select.outputs.ios }}
+      macos: ${{ steps.select.outputs.macos }}
+      tvos: ${{ steps.select.outputs.tvos }}
+      windows: ${{ steps.select.outputs.windows }}
+      ohos: ${{ steps.select.outputs.ohos }}
+      artifacts: ${{ steps.select.outputs.artifacts }}
+      apple: ${{ steps.select.outputs.apple }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select checks for changed paths
+        id: select
+        run: python3 .github/scripts/ci_changes.py

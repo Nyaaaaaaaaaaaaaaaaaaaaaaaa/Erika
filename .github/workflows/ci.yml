@@ -20,6 +20,9 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+
   quality:
     name: Quality (Ubuntu)
     runs-on: ubuntu-latest
@@ -29,10 +32,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - uses: subosito/flutter-action@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          channel: stable
-          cache: true
+          key: quality
       - name: Verify playback fixture checksums
         working-directory: crates/erika/testdata/playback
         run: sha256sum --check SHA256SUMS
@@ -42,38 +44,16 @@ jobs:
         run: cargo run --locked -p xtask -- check license
       - name: Verify vendored Cargo patches
         run: cargo run --locked -p xtask -- check cargo-patches
-      - name: Get Flutter dependencies
-        working-directory: packages/erika_flutter
-        run: flutter pub get
-      - name: Analyze Flutter package
-        working-directory: packages/erika_flutter
-        run: flutter analyze --no-pub
-      - name: Test Flutter package
-        working-directory: packages/erika_flutter
-        run: flutter test --no-pub --reporter expanded
-      - name: Validate pub package
-        working-directory: packages/erika_flutter
-        env:
-          PUB_HOSTED_URL: https://pub.dev
-        run: flutter pub publish --dry-run
-      - name: Test Flutter package outside the monorepo
-        env:
-          PUB_HOSTED_URL: https://pub.dev
-        run: |
-          set -euo pipefail
-          work="$(mktemp -d)"
-          trap 'rm -rf "$work"' EXIT
-          mkdir -p "$work/erika_flutter"
-          git archive HEAD:packages/erika_flutter | tar -x -C "$work/erika_flutter"
-          test ! -e "$work/crates"
-          cd "$work/erika_flutter"
-          flutter pub get
-          flutter analyze --no-pub
-          flutter test --no-pub --reporter expanded
+      - name: Test CI change selection and artifact validation
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
   rust-macos:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: Rust (macOS ${{ matrix.arch }})
     timeout-minutes: 150
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     strategy:
       fail-fast: false
       matrix:
@@ -93,11 +73,14 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - name: Cache native dependencies
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: third_party
-          key: native-v2-macos-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: ${{ matrix.target }}-macos-min11.0-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
+      - name: Cache native dependencies
+        uses: ./.github/actions/cache-native
+        with:
+          target: ${{ matrix.target }}
+          toolchain: macos-min11.0
       - name: Build native dependencies
         run: |
           cargo run --locked -p xtask -- deps build \
@@ -129,6 +112,8 @@ jobs:
           --no-deps
 
   ios:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: iOS device staticlib
     runs-on: macos-26
     timeout-minutes: 150
@@ -141,11 +126,14 @@ jobs:
           targets: aarch64-apple-ios
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - name: Cache native dependencies
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: third_party
-          key: native-v2-ios-device-aarch64-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: aarch64-apple-ios-ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
+      - name: Cache native dependencies
+        uses: ./.github/actions/cache-native
+        with:
+          target: aarch64-apple-ios
+          toolchain: ios-min${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
       - name: Build iOS native dependencies
         run: >-
           cargo run --locked -p xtask -- deps build
@@ -171,6 +159,8 @@ jobs:
           done
 
   tvos:
+    needs: changes
+    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.tvos == 'true'
     name: tvOS simulator staticlib
     runs-on: macos-26
     timeout-minutes: 150
@@ -183,11 +173,14 @@ jobs:
           components: rust-src
       - name: Install native build tools
         run: brew install nasm meson ninja pkg-config
-      - name: Cache native dependencies
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: third_party
-          key: native-v2-tvos-simulator-aarch64-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: aarch64-apple-tvos-sim-tvos-min${{ env.TVOS_DEPLOYMENT_TARGET }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
+      - name: Cache native dependencies
+        uses: ./.github/actions/cache-native
+        with:
+          target: aarch64-apple-tvos-sim
+          toolchain: tvos-min${{ env.TVOS_DEPLOYMENT_TARGET }}
       - name: Build tvOS native dependencies
         run: >-
           cargo run --locked -p xtask -- deps build
@@ -202,8 +195,12 @@ jobs:
               -p erika_capi --lib --release \
               --target aarch64-apple-tvos-sim \
               --no-default-features --crate-type staticlib
+          lipo -info target/aarch64-apple-tvos-sim/release/liberika_capi.a |
+            grep -Eq 'arm64|Non-fat'
 
   windows:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     name: Windows ${{ matrix.arch }} build
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -270,11 +267,14 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
           Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\NASM"
           git config --global core.longpaths true
-      - name: Cache native dependencies
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: third_party
-          key: native-v2-windows-${{ matrix.target }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: ${{ matrix.target }}-msvc-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
+      - name: Cache native dependencies
+        uses: ./.github/actions/cache-native
+        with:
+          target: ${{ matrix.target }}
+          toolchain: msvc
       - name: Verify FFmpeg make shell
         shell: pwsh
         run: |

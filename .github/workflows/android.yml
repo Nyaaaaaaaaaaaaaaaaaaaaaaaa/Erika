@@ -5,19 +5,37 @@ on:
     paths:
       - ".cargo/**"
       - ".github/workflows/android.yml"
+      - ".github/actions/cache-native/**"
       - "Cargo.lock"
       - "Cargo.toml"
+      - "rust-toolchain*"
       - "crates/**"
       - "packaging/**"
-      - "packages/erika_flutter/**"
       - "third_party/patches/**"
+      - "third_party/wgpu-hal/**"
       - "xtask/**"
   push:
     branches: [main]
+    paths:
+      - ".cargo/**"
+      - ".github/workflows/android.yml"
+      - ".github/actions/cache-native/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust-toolchain*"
+      - "crates/**"
+      - "packaging/**"
+      - "third_party/patches/**"
+      - "third_party/wgpu-hal/**"
+      - "xtask/**"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   ANDROID_API_LEVEL: "26"
@@ -63,11 +81,14 @@ jobs:
           sudo apt-get install -y build-essential cmake make meson nasm ninja-build pkg-config libclang-dev python3-venv
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
-      - name: Cache native dependencies
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: third_party
-          key: native-v2-android-${{ matrix.rust_target }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/src/main.rs', 'third_party/patches/**') }}
+          key: ${{ matrix.rust_target }}-ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}-${{ hashFiles('xtask/**', 'third_party/patches/**', 'third_party/wgpu-hal/**') }}
+      - name: Cache native dependencies
+        uses: ./.github/actions/cache-native
+        with:
+          target: ${{ matrix.rust_target }}
+          toolchain: ndk${{ env.ANDROID_NDK_VERSION }}-api${{ env.ANDROID_API_LEVEL }}
       - name: Build native dependencies and static C API
         shell: bash
         run: |
@@ -89,10 +110,10 @@ jobs:
           export "CC_${CC_KEY}=$CC" "CXX_${CC_KEY}=$CXX" "AR_${CC_KEY}=$AR"
           export "BINDGEN_EXTRA_CLANG_ARGS_${CC_KEY}=--target=${{ matrix.clang_target }}${ANDROID_API_LEVEL} --sysroot=$PREBUILT/sysroot"
           export "CFLAGS_${CC_KEY}=-fPIC" "CXXFLAGS_${CC_KEY}=-fPIC"
-          cargo run -p xtask -- deps plan --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
-          cargo run -p xtask -- deps build --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
+          cargo run --locked -p xtask -- deps plan --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
+          cargo run --locked -p xtask -- deps build --profile "$ERIKA_NATIVE_PROFILE" --target "$T"
           ERIKA_NATIVE_TARGET="$T" \
-            cargo build -p erika_capi --release --target "$T" \
+            cargo build --locked -p erika_capi --release --target "$T" \
               --no-default-features --features wgpu
           mkdir -p "out/android/${{ matrix.abi }}"
           cp "target/$T/release/liberika_capi.a" "out/android/${{ matrix.abi }}/liberika_capi.a"
